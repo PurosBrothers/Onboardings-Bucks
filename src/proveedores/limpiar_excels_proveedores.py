@@ -6,135 +6,16 @@ import numpy as np
 import os
 from collections import Counter
 
-def analyze_row_density(df: pd.DataFrame, threshold: float = 0.3) -> List[int]:
-    """
-    Analyze each row to determine which ones have enough data to be considered valid.
-    
-    Args:
-        df (pd.DataFrame): The input DataFrame
-        threshold (float): Minimum proportion of non-null values required (default: 0.3)
-    
-    Returns:
-        List[int]: List of indices for rows that meet the density threshold
-    """
-    # Calculate the proportion of non-null values for each row
-    row_densities = df.notna().sum(axis=1) / df.shape[1]
-    
-    # Get indices where density is above threshold
-    valid_indices = row_densities[row_densities >= threshold].index.tolist()
-    
-    print(f"Found {len(valid_indices)} rows with data density above {threshold*100}%")
-    
-    # Print density distribution
-    print("\nDensity distribution:")
-    print(row_densities.describe())
-    
-    return valid_indices
+"""
+Script profesional para limpiar y procesar archivos de proveedores (Libro Auxiliar).
+- Todos los métodos y logs están en español.
+- Funciones separadas y bien documentadas.
+- Un método general orquesta todo el flujo.
+"""
 
-def analyze_data(df: pd.DataFrame) -> None:
-    """
-    Print analysis of the DataFrame contents.
-    
-    Args:
-        df (pd.DataFrame): DataFrame to analyze
-    """
-    print("\nFirst few rows:")
-    print(df.iloc[:5, [1, 2]].to_string())  # Show PUC and description columns
-    
-    # Count account types (starting with 5 or 6)
-    accounts = df.iloc[:, 1].astype(str).str[:1]  # Get first digit of PUC code
-    account_counts = accounts[accounts.isin(['5', '6'])].value_counts()
-    
-    print("\nAccount number distribution:")
-    for digit, count in account_counts.items():
-        print(f"Starting with {digit}: {count} rows")
-
-def extract_nit_info(row: pd.Series) -> Tuple[str, str]:
-    """
-    Extract NIT and name from row data, using multiple columns for validation.
-    
-    Args:
-        row (pd.Series): Row containing NIT and name information
-        
-    Returns:
-        Tuple[str, str]: NIT and name
-    """
-    try:
-        # Get values from relevant columns
-        nit_nombre = str(row.iloc[3]) if pd.notna(row.iloc[3]) else ""
-        nit_formatted = str(row.iloc[4]) if pd.notna(row.iloc[4]) else ""
-        nombre_alt = str(row.iloc[7]) if pd.notna(row.iloc[7]) else ""
-        
-        print(f"\nNIT/Nombre extraction debug:")
-        print(f"Column 4 (NIT + Nombre): {nit_nombre}")
-        print(f"Column 5 (NIT formatted): {nit_formatted}")
-        print(f"Column 8 (Nombre alt): {nombre_alt}")
-        
-        # Extract NIT (only digits) from column 4
-        nit = ''.join(c for c in nit_nombre if c.isdigit())
-        
-        # Validate NIT against column 5 (removing commas)
-        nit_validation = ''.join(c for c in nit_formatted if c.isdigit())
-        if nit_validation and nit != nit_validation:
-            print(f"Warning: NIT mismatch - Col4: {nit}, Col5: {nit_validation}")
-            nit = nit_validation  # Use the formatted version if different
-            
-        # Get name from column 8
-        nombre = nombre_alt.strip()
-        
-        return nit, nombre
-        
-    except Exception as e:
-        print(f"Error in extract_nit_info: {str(e)}")
-        print(f"Row data: {row.to_dict()}")
-        return "", ""
-
-def find_header_row(df: pd.DataFrame, unnamed_threshold: float = 0.5) -> int:
-    """
-    Find the first row that should be used as headers by checking the proportion of unnamed columns.
-    
-    Args:
-        df (pd.DataFrame): The input DataFrame
-        unnamed_threshold (float): Maximum proportion of unnamed columns allowed
-        
-    Returns:
-        int: Index of the row to use as header
-    """
-    for idx in range(len(df)):
-        # Convert row to column names and check proportion of unnamed
-        test_columns = df.iloc[idx].tolist()
-        
-        # Count empty, nan, or unnamed values
-        unnamed_count = sum(1 for col in test_columns 
-                          if pd.isna(col)
-                          or not str(col).strip()
-                          or str(col).strip().startswith('Unnamed:'))
-        
-        # Count meaningful values (not just any non-empty string)
-        meaningful_values = sum(1 for col in test_columns 
-                              if pd.notna(col)
-                              and str(col).strip()
-                              and any(keyword in str(col).lower() for keyword in 
-                                    ['cuenta', 'nit', 'saldo', 'fecha', 'descripcion', 'debito', 'credito', 'comprobante']))
-        
-        unnamed_proportion = unnamed_count / len(test_columns)
-        
-        # We want at least 3 meaningful column names and less than threshold unnamed
-        if meaningful_values >= 3 and unnamed_proportion <= unnamed_threshold:
-            print(f"\nFound header row at index {idx}")
-            print("Headers:", [str(col).strip() for col in test_columns if pd.notna(col) and str(col).strip()])
-            return idx
-            
-        # Debug information
-        if idx < 10:  # Print first 10 rows for debugging
-            print(f"\nRow {idx} analysis:")
-            print(f"Meaningful values: {meaningful_values}")
-            print(f"Unnamed proportion: {unnamed_proportion:.2f}")
-            print("Values:", [str(col).strip() for col in test_columns if pd.notna(col) and str(col).strip()])
-            
-    return 7  # Default to row 6 if no good header row found
-
-# Define expected row counts for different files
+# =============================
+# CONFIGURACIÓN Y CONSTANTES
+# =============================
 EXPECTED_COUNTS = {
     "Surtiflora-LibroAuxiliar_2022.csv": {
         "total_rows": 7301,
@@ -154,329 +35,437 @@ EXPECTED_COUNTS = {
         "puc_6_rows": 1419,
         "description": "Surtiflora-LibroAuxiliar_2024"
     }
-    # Add more files as needed
 }
 
-def validate_row_counts(filename: str, total_rows: int, puc_5: int, puc_6: int) -> None:
+# =============================
+# FUNCIONES AUXILIARES
+# =============================
+def analizar_densidad_filas(df: pd.DataFrame, umbral: float = 0.3) -> List[int]:
     """
-    Validate row counts against expected values for a given file.
+    Analiza la densidad de datos por fila y retorna los índices válidos.
     
     Args:
-        filename (str): Name of the file being processed
-        total_rows (int): Total number of rows processed
-        puc_5 (int): Number of rows with PUC starting with 5
-        puc_6 (int): Number of rows with PUC starting with 6
+        df (pd.DataFrame): El DataFrame de entrada
+        umbral (float): Proporción mínima de valores no nulos requerida (por defecto: 0.3)
+    
+    Returns:
+        List[int]: Lista de índices de filas que cumplen con el umbral de densidad
+    """
+    # Calcular la proporción de valores no nulos para cada fila
+    densidades = df.notna().sum(axis=1) / df.shape[1]
+    
+    # Obtener índices donde la densidad está por encima del umbral
+    indices_validos = densidades[densidades >= umbral].index.tolist()
+    
+    print(f"Se encontraron {len(indices_validos)} filas con densidad de datos mayor al {umbral*100}%")
+    
+    # Imprimir distribución de densidad
+    print("\nDistribución de densidad:")
+    print(densidades.describe())
+    
+    return indices_validos
+
+def analizar_datos(df: pd.DataFrame) -> None:
+    """
+    Muestra un resumen de las primeras filas y la distribución de cuentas PUC.
+    
+    Args:
+        df (pd.DataFrame): DataFrame a analizar
+    """
+    print("\nPrimeras filas:")
+    print(df.iloc[:5, [1, 2]].to_string())  # Mostrar columnas de PUC y descripción
+    
+    # Contar tipos de cuenta (comenzando con 5 o 6)
+    cuentas = df.iloc[:, 1].astype(str).str[:1]  # Obtener el primer dígito del código PUC
+    conteo = cuentas[cuentas.isin(['5', '6'])].value_counts()
+    
+    print("\nDistribución de cuentas:")
+    for digito, cantidad in conteo.items():
+        print(f"Comienza con {digito}: {cantidad} filas")
+
+def extraer_nit_nombre(fila: pd.Series) -> Tuple[str, str]:
+    """
+    Extrae el NIT y el nombre de una fila, usando múltiples columnas para validación.
+    
+    Args:
+        fila (pd.Series): Fila que contiene información de NIT y nombre
+        
+    Returns:
+        Tuple[str, str]: NIT y nombre
+    """
+    try:
+        # Obtener valores de las columnas relevantes
+        nit_nombre = str(fila.iloc[3]) if pd.notna(fila.iloc[3]) else ""
+        nit_formateado = str(fila.iloc[4]) if pd.notna(fila.iloc[4]) else ""
+        nombre_alt = str(fila.iloc[7]) if pd.notna(fila.iloc[7]) else ""
+        
+        print(f"\nDepuración extracción NIT/Nombre:")
+        print(f"Columna 4 (NIT + Nombre): {nit_nombre}")
+        print(f"Columna 5 (NIT formateado): {nit_formateado}")
+        print(f"Columna 8 (Nombre alt): {nombre_alt}")
+        
+        # Extraer NIT (solo dígitos) de la columna 4
+        nit = ''.join(c for c in nit_nombre if c.isdigit())
+        
+        # Validar NIT contra la columna 5 (eliminando comas)
+        nit_validacion = ''.join(c for c in nit_formateado if c.isdigit())
+        if nit_validacion and nit != nit_validacion:
+            print(f"Advertencia: NIT diferente entre columnas - Col4: {nit}, Col5: {nit_validacion}")
+            nit = nit_validacion  # Usar la versión formateada si es diferente
+            
+        # Obtener nombre de la columna 8
+        nombre = nombre_alt.strip()
+        
+        return nit, nombre
+        
+    except Exception as e:
+        print(f"Error en extraer_nit_nombre: {str(e)}")
+        print(f"Datos de la fila: {fila.to_dict()}")
+        return "", ""
+
+def encontrar_fila_encabezado(df: pd.DataFrame, umbral_unnamed: float = 0.5) -> int:
+    """
+    Busca la primera fila que debe usarse como encabezados verificando la proporción de columnas sin nombre.
+    
+    Args:
+        df (pd.DataFrame): El DataFrame de entrada
+        umbral_unnamed (float): Proporción máxima de columnas sin nombre permitida
+        
+    Returns:
+        int: Índice de la fila a usar como encabezado
+    """
+    for idx in range(len(df)):
+        # Convertir fila a nombres de columna y verificar proporción de sin nombre
+        columnas_prueba = df.iloc[idx].tolist()
+        
+        # Contar valores vacíos, nan, o sin nombre
+        sin_nombre = sum(1 for col in columnas_prueba 
+                          if pd.isna(col)
+                          or not str(col).strip()
+                          or str(col).strip().startswith('Unnamed:'))
+        
+        # Contar valores significativos (no solo cualquier cadena no vacía)
+        valores_significativos = sum(1 for col in columnas_prueba 
+                              if pd.notna(col)
+                              and str(col).strip()
+                              and any(palabra in str(col).lower() for palabra in 
+                                    ['cuenta', 'nit', 'saldo', 'fecha', 'descripcion', 'debito', 'credito', 'comprobante']))
+        
+        proporcion_sin_nombre = sin_nombre / len(columnas_prueba)
+        
+        # Queremos al menos 3 nombres de columna significativos y menos que el umbral de sin nombre
+        if valores_significativos >= 3 and proporcion_sin_nombre <= umbral_unnamed:
+            print(f"\nEncabezado encontrado en la fila {idx}")
+            print("Encabezados:", [str(col).strip() for col in columnas_prueba if pd.notna(col) and str(col).strip()])
+            return idx
+            
+        # Información de depuración
+        if idx < 10:  # Imprimir primeras 10 filas para depuración
+            print(f"\nAnálisis de fila {idx}:")
+            print(f"Valores significativos: {valores_significativos}")
+            print(f"Proporción sin nombre: {proporcion_sin_nombre:.2f}")
+            print("Valores:", [str(col).strip() for col in columnas_prueba if pd.notna(col) and str(col).strip()])
+            
+    return 7  # Por defecto a la fila 6 si no se encuentra una buena fila de encabezado
+
+def validar_conteo_filas(nombre_archivo: str, total: int, puc_5: int, puc_6: int) -> None:
+    """
+    Valida los conteos de filas contra los valores esperados para un archivo dado.
+    
+    Args:
+        nombre_archivo (str): Nombre del archivo siendo procesado
+        total (int): Número total de filas procesadas
+        puc_5 (int): Número de filas con PUC comenzando con 5
+        puc_6 (int): Número de filas con PUC comenzando con 6
         
     Raises:
-        ValueError: If validation fails or no rules found for the file
+        ValueError: Si la validación falla o no se encuentran reglas para el archivo
     """
-    base_filename = os.path.basename(filename)
-    if base_filename not in EXPECTED_COUNTS:
-        raise ValueError(f"No validation rules found for {base_filename}")
+    base = os.path.basename(nombre_archivo)
+    if base not in EXPECTED_COUNTS:
+        raise ValueError(f"No hay reglas de validación para {base}")
         
-    expected = EXPECTED_COUNTS[base_filename]
-    errors = []
+    esperado = EXPECTED_COUNTS[base]
+    errores = []
     
-    if total_rows != expected["total_rows"]:
-        errors.append(f"Expected {expected['total_rows']} total rows, but got {total_rows}")
-    if puc_5 != expected["puc_5_rows"]:
-        errors.append(f"Expected {expected['puc_5_rows']} rows starting with 5, but got {puc_5}")
-    if puc_6 != expected["puc_6_rows"]:
-        errors.append(f"Expected {expected['puc_6_rows']} rows starting with 6, but got {puc_6}")
+    if total != esperado["total_rows"]:
+        errores.append(f"Se esperaban {esperado['total_rows']} filas, pero hay {total}")
+    if puc_5 != esperado["puc_5_rows"]:
+        errores.append(f"Se esperaban {esperado['puc_5_rows']} filas de PUC 5, pero hay {puc_5}")
+    if puc_6 != esperado["puc_6_rows"]:
+        errores.append(f"Se esperaban {esperado['puc_6_rows']} filas de PUC 6, pero hay {puc_6}")
         
-    if errors:
-        raise ValueError(f"Validation failed for {expected['description']}:\n" + "\n".join(errors))
+    if errores:
+        raise ValueError(f"Validación fallida para {esperado['description']}:\n" + "\n".join(errores))
         
-    print(f"\nRow count validation passed for {expected['description']} ✓")
+    print(f"\nValidación de conteo de filas exitosa para {esperado['description']} ✓")
 
-def procesar_libro_auxiliar(
-    input_file: str, 
-    output_file: str, 
-    expected_counts: Dict[str, int] | None = None
-) -> None:
+# =============================
+# PROCESAMIENTO PRINCIPAL DE ARCHIVO
+# =============================
+def procesar_libro_auxiliar(input_file: str, output_file: str, expected_counts: Dict[str, int] | None = None) -> None:
     """
-    Process the auxiliary book file to extract and structure provider information.
+    Procesa un archivo de libro auxiliar y genera un CSV limpio.
     
     Args:
-        input_file (str): Path to the input CSV file
-        output_file (str): Path to save the processed CSV file
-        expected_counts (Dict[str, int] | None): Optional dictionary with expected row counts
-            containing keys: "total_rows", "puc_5_rows", "puc_6_rows"
+        input_file (str): Ruta al archivo CSV de entrada
+        output_file (str): Ruta para guardar el archivo CSV procesado
+        expected_counts (Dict[str, int] | None): Diccionario opcional con conteos de filas esperados
+            que contiene claves: "total_rows", "puc_5_rows", "puc_6_rows"
     """
-    # Ensure file paths use Windows-compatible separators
+    # Asegurar que las rutas de archivo usen separadores compatibles con Windows
     input_file = os.path.normpath(input_file)
     output_file = os.path.normpath(output_file)
     
-    # Try different encodings for Windows
-    encodings = ['latin1', 'utf-8', 'cp1252']
+    # Probar diferentes codificaciones para Windows
+    codificaciones = ['latin1', 'utf-8', 'cp1252']
     df = None
-    successful_encoding = None
+    codificacion_exitosa = None
     
-    for encoding in encodings:
+    for codificacion in codificaciones:
         try:
-            print(f"\nIntentando leer el archivo con codificación: {encoding}")
-            # Read the CSV file without headers first
-            df = pd.read_csv(input_file, engine='python', encoding=encoding, header=None)
-            successful_encoding = encoding
-            print(f"Éxito al leer el archivo con codificación: {encoding}")
+            print(f"\nIntentando leer el archivo con codificación: {codificacion}")
+            # Leer el archivo CSV sin encabezados primero
+            df = pd.read_csv(input_file, engine='python', encoding=codificacion, header=None)
+            codificacion_exitosa = codificacion
+            print(f"Lectura exitosa con codificación: {codificacion}")
             break
         except Exception as e:
-            print(f"Error al leer con codificación {encoding}: {str(e)}")
+            print(f"Error con codificación {codificacion}: {str(e)}")
             continue
     
     if df is None:
         raise ValueError("No se pudo leer el archivo con ninguna de las codificaciones intentadas")
     
-    print("\nInitial data analysis:")
-    print(f"Total rows: {len(df)}")
+    print(f"\nAnálisis inicial: {len(df)} filas")
     
-    # Find the header row
-    header_row = find_header_row(df)
+    # Encontrar la fila del encabezado
+    fila_encabezado = encontrar_fila_encabezado(df)
     
-    # Re-read the CSV with the correct header row
+    # Volver a leer el CSV con la fila de encabezado correcta
     try:
-        df = pd.read_csv(input_file, engine='python', encoding=successful_encoding, skiprows=header_row)
+        df = pd.read_csv(input_file, engine='python', encoding=codificacion_exitosa, skiprows=fila_encabezado)
     except Exception as e:
-        print(f"Error al releer el archivo con las cabeceras correctas: {str(e)}")
-        # Try alternative approach - read without headers and set them manually
-        df = pd.read_csv(input_file, engine='python', encoding=successful_encoding, header=None, skiprows=header_row)
-        # Use the first row as header (this approach might need adjustment)
-        df.columns = [f"Column_{i}" if pd.isna(x) or not str(x).strip() else str(x).strip() for i, x in enumerate(df.iloc[0])]
+        print(f"Error al releer con encabezados: {str(e)}")
+        # Probar enfoque alternativo - leer sin encabezados y establecer manualmente
+        df = pd.read_csv(input_file, engine='python', encoding=codificacion_exitosa, header=None, skiprows=fila_encabezado)
+        # Usar la primera fila como encabezado (este enfoque puede necesitar ajustes)
+        df.columns = [f"Col_{i}" if pd.isna(x) or not str(x).strip() else str(x).strip() for i, x in enumerate(df.iloc[0])]
         df = df.iloc[1:].reset_index(drop=True)
     
-    print("\nProcessing with correct headers:")
-    print(f"Columns: {df.columns.tolist()}")
+    print(f"\nColumnas detectadas: {df.columns.tolist()}")
     
-    # Get valid row indices based on data density
-    valid_indices = analyze_row_density(df)
+    # Obtener índices válidos basados en la densidad de datos
+    indices_validos = analizar_densidad_filas(df)
     
-    # Filter DataFrame to keep only valid rows
-    df_filtered = df.iloc[valid_indices].copy()
+    # Filtrar DataFrame para mantener solo filas válidas
+    df_filtrado = df.iloc[indices_validos].copy()
     
-    # Analyze filtered data
-    print("\nAnalyzing filtered data:")
-    analyze_data(df_filtered)
+    # Analizar datos filtrados
+    print("\nAnálisis de datos filtrados:")
+    analizar_datos(df_filtrado)
     
-    # Create output DataFrame
-    output_data: List[Dict] = []
+    # Crear lista para datos de salida
+    datos_salida: List[Dict] = []
     
-    # Process each valid row
-    for _, row in df_filtered.iterrows():
+    # Procesar cada fila válida
+    for _, fila in df_filtrado.iterrows():
         try:
-            # Debug message for row processing
-            #print(f"\nProcessing row {row.name} of {len(df_filtered)}: ")
-            
-            # Get PUC code and description directly from columns
-            # Handle potential string conversion errors
-            try:
-                codigo_puc = ""
-                if pd.notna(row.iloc[1]):
-                    try:
-                        # Try converting through float first
-                        codigo_puc = str(int(float(row.iloc[1])))
-                    except:
-                        # If that fails, use the string directly
-                        codigo_puc = str(row.iloc[1]).strip()
-            except Exception as e:
-                print(f"Error converting PUC code: {str(e)}")
-                print(f"Raw value: {row.iloc[1]}, type: {type(row.iloc[1])}")
-                codigo_puc = ""
-                
-            descripcion = str(row.iloc[2]) if pd.notna(row.iloc[2]) else ""
-            
-            # Only process rows where account number starts with 5 or 6
+            # Obtener código PUC y descripción directamente de las columnas
+            # Manejar posibles errores de conversión de cadena
+            codigo_puc = ""
+            if pd.notna(fila.iloc[1]):
+                try:
+                    codigo_puc = str(int(float(fila.iloc[1])))
+                except:
+                    codigo_puc = str(fila.iloc[1]).strip()
+            descripcion = str(fila.iloc[2]) if pd.notna(fila.iloc[2]) else ""
+            # Solo procesar filas donde el número de cuenta comienza con 5 o 6
             if codigo_puc and (codigo_puc.startswith('5') or codigo_puc.startswith('6')):
-                nit, nombre = extract_nit_info(row)
-                
-                # Skip rows without NIT or NOMBRE (likely totals)
+                nit, nombre = extraer_nit_nombre(fila)
+                # Omitir filas sin NIT o NOMBRE (probablemente totales)
                 if not nit or not nombre:
                     continue
-                
-                row_data = {
+                fila_dict = {
                     'CUENTA': codigo_puc,
                     'DESCRIPCION': descripcion,
                     'NIT': nit,
                     'NOMBRE': nombre
                 }
-                
-                # Add remaining columns
+                # Agregar columnas restantes
                 for col_idx, col_name in enumerate(df.columns[2:], start=2):
-                    row_data[col_name] = row.iloc[col_idx]
-                
-                output_data.append(row_data)
-                
+                    fila_dict[col_name] = fila.iloc[col_idx]
+                datos_salida.append(fila_dict)
         except Exception as e:
-            print(f"Error processing row {row.name}: {str(e)}")
-            print(f"Row data: {row.iloc[0:5].to_dict()}")  # Print just first few columns to reduce output size
+            print(f"Error procesando fila {fila.name}: {str(e)}")
+            print(f"Datos: {fila.iloc[0:5].to_dict()}")  # Imprimir solo las primeras columnas para reducir tamaño de salida
             continue
     
-    # Create final DataFrame and save to Excel
-    if not output_data:
-        raise ValueError("No se pudo procesar ninguna fila de datos válida")
+    # Crear DataFrame final y guardar en CSV
+    if not datos_salida:
+        raise ValueError("No se pudo procesar ninguna fila válida")
         
-    output_df = pd.DataFrame(output_data)
+    df_final = pd.DataFrame(datos_salida)
     
-    # Remove columns that are entirely empty or NA
-    non_empty_cols = output_df.columns[output_df.notna().any()]
-    output_df = output_df[non_empty_cols]
+    # Eliminar columnas que están completamente vacías o en NA
+    columnas_no_vacias = df_final.columns[df_final.notna().any()]
+    df_final = df_final[columnas_no_vacias]
     
-    # Format CUENTA as integer (removing decimals) - with error handling
+    # Formatear CUENTA como entero (eliminando decimales) - con manejo de errores
     try:
-        output_df['CUENTA'] = output_df['CUENTA'].astype(float).astype(int).astype(str)
+        df_final['CUENTA'] = df_final['CUENTA'].astype(float).astype(int).astype(str)
     except Exception as e:
-        print(f"Error al convertir la columna CUENTA: {str(e)}")
-        print("Se conservará el formato original")
+        print(f"Error convirtiendo CUENTA: {str(e)}. Se conserva el formato original.")
     
-    # Clean column names by trimming whitespace and handling duplicates
-    new_columns = []
-    seen = set()
-    for col in output_df.columns:
-        clean_col = str(col).strip()
-        if clean_col in seen:
+    # Limpiar nombres de columnas
+    nuevas_columnas = []
+    ya_vistas = set()
+    for col in df_final.columns:
+        limpio = str(col).strip()
+        if limpio in ya_vistas:
             i = 1
-            while f"{clean_col}_{i}" in seen:
+            while f"{limpio}_{i}" in ya_vistas:
                 i += 1
-            clean_col = f"{clean_col}_{i}"
-        seen.add(clean_col)
-        new_columns.append(clean_col)
-    output_df.columns = new_columns
+            limpio = f"{limpio}_{i}"
+        ya_vistas.add(limpio)
+        nuevas_columnas.append(limpio)
+    df_final.columns = nuevas_columnas
     
-    # Count PUC codes starting with 5 and 6
-    puc_5 = output_df['CUENTA'].str.startswith('5').sum()
-    puc_6 = output_df['CUENTA'].str.startswith('6').sum()
-    total_rows = len(output_df)
+    # Contar códigos PUC que comienzan con 5 y 6
+    puc_5 = df_final['CUENTA'].str.startswith('5').sum()
+    puc_6 = df_final['CUENTA'].str.startswith('6').sum()
+    total = len(df_final)
     
-    print(f"\nPUC code distribution:")
-    print(f"Starting with 5: {puc_5} rows")
-    print(f"Starting with 6: {puc_6} rows")
-    print(f"Total rows: {total_rows}")
+    print(f"\nDistribución final de PUC:")
+    print(f"Comienza con 5: {puc_5} filas")
+    print(f"Comienza con 6: {puc_6} filas")
+    print(f"Total filas: {total}")
     
-    # Validate row counts if expected counts were provided
+    # Validar conteos de filas si se proporcionaron conteos esperados
     if expected_counts:
-        try:
-            errors = []
-            if total_rows != expected_counts["total_rows"]:
-                errors.append(f"Expected {expected_counts['total_rows']} total rows, but got {total_rows}")
-            if puc_5 != expected_counts["puc_5_rows"]:
-                errors.append(f"Expected {expected_counts['puc_5_rows']} rows starting with 5, but got {puc_5}")
-            if puc_6 != expected_counts["puc_6_rows"]:
-                errors.append(f"Expected {expected_counts['puc_6_rows']} rows starting with 6, but got {puc_6}")
-            
-            if errors:
-                print("\nADVERTENCIA: Validación de conteo de filas fallida:")
-                for error in errors:
-                    print(f"  - {error}")
-                print("Esto podría indicar cambios en los datos o en la lógica de procesamiento.")
-                print("Se continuará con el procesamiento a pesar de las diferencias.")
-                # Don't raise exception to allow processing to continue
-            else:
-                print("\nRow count validation passed ✓")
-        except ValueError as e:
-            print(f"\nError: {str(e)}")
-            print("This might indicate changes in the data or processing logic.")
-            # Don't raise to allow processing to continue
+        errores = []
+        if total != expected_counts["total_rows"]:
+            errores.append(f"Se esperaban {expected_counts['total_rows']} filas, pero hay {total}")
+        if puc_5 != expected_counts["puc_5_rows"]:
+            errores.append(f"Se esperaban {expected_counts['puc_5_rows']} filas de PUC 5, pero hay {puc_5}")
+        if puc_6 != expected_counts["puc_6_rows"]:
+            errores.append(f"Se esperaban {expected_counts['puc_6_rows']} filas de PUC 6, pero hay {puc_6}")
+        
+        if errores:
+            print("\nADVERTENCIA: Validación de conteo de filas fallida:")
+            for error in errores:
+                print(f"  - {error}")
+            print("Se continuará con el procesamiento a pesar de las diferencias.")
+        else:
+            print("\nValidación de conteo de filas exitosa ✓")
     
-    print(f"\nFinal processed data:")
-    print(f"Total rows to be saved: {len(output_df)}")
-    print(f"Columns being saved: {list(output_df.columns)}")
-    print("\nSample of processed data:")
-    print(output_df.head())
+    print(f"\nDatos finales procesados: {len(df_final)} filas, columnas: {list(df_final.columns)}")
+    print("\nMuestra de datos procesados:")
+    print(df_final.head())
     
-    # Use try-except for saving to CSV
+    # Usar try-except para guardar en CSV
     try:
-        output_df.to_csv(output_file, index=False, encoding='utf-8-sig')
-        print(f"\nProcessed file saved as {output_file} with {len(output_data)} rows and {len(non_empty_cols)} columns.")
+        df_final.to_csv(output_file, index=False, encoding='utf-8-sig')
+        print(f"\nArchivo procesado guardado como {output_file} con {len(df_final)} filas y {len(columnas_no_vacias)} columnas.")
     except Exception as e:
         print(f"\nError al guardar el archivo CSV: {str(e)}")
 
-def process_all_files(input_dir: str, output_dir: str) -> None:
+# =============================
+# PROCESAMIENTO DE TODOS LOS ARCHIVOS
+# =============================
+def procesar_todos_los_archivos(directorio_entrada: str, directorio_salida: str) -> None:
     """
-    Process all CSV files in the input directory.
-
+    Procesa todos los archivos CSV en el directorio de entrada y guarda los resultados en el de salida.
+    
     Args:
-        input_dir (str): Directory containing input CSV files
-        output_dir (str): Directory where output CSV files will be saved
+        directorio_entrada (str): Directorio que contiene archivos CSV de entrada
+        directorio_salida (str): Directorio donde se guardarán los archivos CSV de salida
 
     Raises:
-        ValueError: If any file fails validation
+        ValueError: Si algún archivo falla en la validación
     """
-    # Ensure output directory exists
-    os.makedirs(output_dir, exist_ok=True)
+    # Asegurar que el directorio de salida exista
+    os.makedirs(directorio_salida, exist_ok=True)
 
-    # Find all CSV files in input directory
-    csv_files = [f for f in os.listdir(input_dir) if f.endswith('.csv')]
+    # Encontrar todos los archivos CSV en el directorio de entrada
+    archivos_csv = [f for f in os.listdir(directorio_entrada) if f.endswith('.csv')]
 
-    if not csv_files:
-        print(f"No CSV files found in {input_dir}")
+    if not archivos_csv:
+        print(f"No se encontraron archivos CSV en {directorio_entrada}")
         return
 
-    print(f"\nFound {len(csv_files)} CSV files to process:")
-    for file in csv_files:
-        print(f"- {file}")
+    print(f"\nSe encontraron {len(archivos_csv)} archivos CSV para procesar:")
+    for archivo in archivos_csv:
+        print(f"- {archivo}")
 
-    # Keep track of processing results
-    results = []
+    # Mantener un registro de los resultados del procesamiento
+    resultados = []
 
-    # Process each file
-    for csv_file in csv_files:
-        input_file = os.path.join(input_dir, csv_file)
-        output_file = os.path.join(output_dir, csv_file.replace('.csv', '_Procesado.csv'))
+    # Procesar cada archivo
+    for archivo_csv in archivos_csv:
+        archivo_entrada = os.path.join(directorio_entrada, archivo_csv)
+        archivo_salida = os.path.join(directorio_salida, archivo_csv.replace('.csv', '_Procesado.csv'))
 
         print(f"\n{'='*80}")
-        print(f"Processing {csv_file}...")
+        print(f"Procesando {archivo_csv}...")
         print(f"{'='*80}")
 
         try:
-            # Get expected counts if available
-            expected_counts = EXPECTED_COUNTS.get(csv_file)
-            if not expected_counts:
-                raise ValueError(f"Validation rules required but not found for {csv_file}")
+            # Obtener conteos esperados si están disponibles
+            expected = EXPECTED_COUNTS.get(archivo_csv)
+            if not expected:
+                raise ValueError(f"No hay reglas de validación para {archivo_csv}")
 
-            procesar_libro_auxiliar(input_file, output_file, expected_counts)
-            results.append({
-                "file": csv_file,
-                "status": "✅ Success",
-                "total_rows": expected_counts["total_rows"],
-                "puc_5_rows": expected_counts["puc_5_rows"],
-                "puc_6_rows": expected_counts["puc_6_rows"]
+            procesar_libro_auxiliar(archivo_entrada, archivo_salida, expected)
+            resultados.append({
+                "archivo": archivo_csv,
+                "estado": "✅ Éxito",
+                "total": expected["total_rows"],
+                "puc_5": expected["puc_5_rows"],
+                "puc_6": expected["puc_6_rows"]
             })
-            print(f"Successfully processed {csv_file}")
+            print(f"Procesado correctamente {archivo_csv}")
 
         except Exception as e:
-            results.append({
-                "file": csv_file,
-                "status": "❌ Failed",
+            resultados.append({
+                "archivo": archivo_csv,
+                "estado": "❌ Fallo",
                 "error": str(e)
             })
-            print(f"Error processing {csv_file}: {str(e)}")
+            print(f"Error procesando {archivo_csv}: {str(e)}")
             sys.exit(1)
 
-    # Print summary
+    # Imprimir resumen
     print("\n" + "="*100)
-    print("PROCESSING SUMMARY")
+    print("RESUMEN DE PROCESAMIENTO")
     print("="*100)
-    print(f"Total files processed: {len(results)}")
+    print(f"Total de archivos procesados: {len(resultados)}")
 
-    for result in results:
-        print(f"\nFile: {result['file']}")
-        print(f"Status: {result['status']}")
-        if result['status'] == "✅ Success":
-            print(f"Total rows: {result['total_rows']}")
-            print(f"PUC 5 rows: {result['puc_5_rows']}")
-            print(f"PUC 6 rows: {result['puc_6_rows']}")
+    for res in resultados:
+        print(f"\nArchivo: {res['archivo']}")
+        print(f"Estado: {res['estado']}")
+        if res['estado'] == "✅ Éxito":
+            print(f"Total filas: {res['total']}")
+            print(f"PUC 5 filas: {res['puc_5']}")
+            print(f"PUC 6 filas: {res['puc_6']}")
         else:
-            print(f"Error: {result['error']}")
+            print(f"Error: {res['error']}")
 
+# =============================
+# MÉTODO GENERAL PARA LLAMAR TODO
+# =============================
+def limpiar_y_procesar_proveedores(input_dir, output_dir):
+    """
+    Método general para limpiar y procesar todos los archivos de proveedores.
+    Args:
+        input_dir (str): Directorio de entrada con los archivos CSV
+        output_dir (str): Directorio de salida para los archivos procesados
+    """
+    procesar_todos_los_archivos(input_dir, output_dir)
+
+# =============================
+# MAIN
+# =============================
 if __name__ == "__main__":
-    # Usar ruta completa o relativa correcta para Windows
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    # Check if input file exists
-    if not os.path.exists(current_dir):
-        raise FileNotFoundError(f"Input file not found: {current_dir}")
-
-    # Print directory contents
-    print("\nDirectory contents:")
-    os.system("ls -al")
-
-    # Process all .csv files in directory
-    process_all_files(current_dir, current_dir)
+    directorio_actual = os.path.dirname(os.path.abspath(__file__))
+    limpiar_y_procesar_proveedores(directorio_actual, directorio_actual)

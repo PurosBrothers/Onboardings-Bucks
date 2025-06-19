@@ -1,6 +1,18 @@
 """
-Main script to run all data processing tasks.
+Script principal de automatización para el procesamiento y carga de datos en el sistema Bucks OnBoardings.
+
+Este script ejecuta de forma secuencial y automatizada los siguientes procesos:
+1. Configuración y recreación del usuario de pruebas en la base de datos, incluyendo módulos e integraciones asociadas.
+2. Limpieza y carga de productos en la base de datos a partir de archivos CSV.
+3. Procesamiento y limpieza de archivos del Libro Auxiliar de proveedores.
+4. Ejecución del proceso de onboarding de proveedores.
+5. Actualización de la responsabilidad fiscal y actividad económica de terceros.
+6. Procesamiento de facturas de arrendamiento por proveedor.
+7. Carga y subida de PUCs del usuario.
+8. Procesamiento del modelo de causación a partir de un archivo Excel.
+
 """
+
 import os
 import sys
 import traceback
@@ -41,6 +53,8 @@ test_vars = [
     "DEV_APP_NAME"
 ]
 
+UID = ""
+
 for var in test_vars:
     value = os.getenv(var)
     print(f"  - {var}: {'✓ Set' if value else '✗ Missing'}")
@@ -58,40 +72,39 @@ def run_all_tasks():
         SystemExit: If any task fails
     """
     try:
-        # PASO 1: CONFIGURAR USUARIO
+        # PASO 1: CONFIGURAR USUARIO CORREO, CONTRASEÑA, UID Y TODO
         print("\n" + "="*80)
         print("Running User Setup...")
         print("="*80)
         
         # Importar y ejecutar el script de usuario
-        from surtifloraUser import setup_user
+        from usuario.onboarding_user import setup_user
 
         try:
             # Ejecutar la función setup_user correctamente con asyncio
-            uid = asyncio.run(setup_user())
-            if not uid:
+            UID = asyncio.run(setup_user())
+            if not UID:
                 raise ValueError("Failed to setup user - no UID returned")
             else:
-                print(f"Usuario {uid} configurado correctamente.")
+                print(f"Usuario {UID} configurado correctamente.")
+                set_key(str(env_file_path), "UID_USER", UID)
+                print(f"UID_USER actualizado en el .env: {UID}")
         except Exception as e:
             print(f"\nError en la configuración del usuario: {str(e)}")
             print("\nFull stack trace:")
             traceback.print_exc()
             sys.exit(1)
 
-        # PASO 2: GENERAR PRODUCTOS EN DB
-        print("\n" + "="*80)
+        # PASO 2: GENERAR PRODUCTOS EN DB, LEE DE LOS EXCELS Y LOS CREA EN LA DB
+        """ print("\n" + "="*80)
         print("Running Products DB generation...")
         print("="*80)
-
-        # Importar y ejecutar el script de generación de productos en db
-        from surtifloraProductosDBGenerate import delete_existing_products, create_products_from_csv
+        
+        from productos.subir_productos_mongodb import cargar_productos_desde_csv_a_mongodb
         from bson import ObjectId
         
         try:
-            uid = ObjectId(os.getenv("UID_USER"))
-            delete_existing_products(uid)
-            create_products_from_csv()
+            cargar_productos_desde_csv_a_mongodb(UID)
             print("Productos en DB generados correctamente.")
         except Exception as e:
             print(f"\nError en generación de productos: {str(e)}")
@@ -99,37 +112,37 @@ def run_all_tasks():
             traceback.print_exc()
             sys.exit(1)
 
-        # PASO 3: PROCESAR LIBRO AUXILIAR
+        # PASO 3: PROCESAR LIBRO AUXILIAR DE LOS PROVEEDORES
         print("\n" + "="*80)
         print("Running Libro Auxiliar processing...")
         print("="*80)
 
         # Importar y ejecutar el script de procesamiento del libro auxiliar
-        from limpiar_excels import process_all_files
+        from proveedores.limpiar_excels_proveedores import limpiar_y_procesar_proveedores
         
         try:
             input_dir = os.path.join("data", "proveedores")
             output_dir = os.path.join(".", "results")
             print(f"input_dir: {input_dir}")
             print(f"output_dir: {output_dir}")
-            process_all_files(input_dir, output_dir)
+            limpiar_y_procesar_proveedores(input_dir, output_dir)
             print("Libro Auxiliar procesado correctamente.")
         except Exception as e:
             print(f"\nError en procesamiento del Libro Auxiliar: {str(e)}")
             print("\nFull stack trace:")
             traceback.print_exc()
-            sys.exit(1)
+            sys.exit(1)"""
 
-        # PASO 4: ONBOARDING DE PROVEEDORES
+        # PASO 4: SUBE LOS PROVEEDORES A LA DB
         print("\n" + "="*80)
         print("Running Provider Onboarding process...")
         print("="*80)
         
         # Importar y ejecutar el script de onboarding de proveedores
-        from surtiflora import surtiflora_main
+        from proveedores.subir_proveedores_mongodb import subir_main
         
         try:
-            surtiflora_main()
+            subir_main(UID, True)
             print("El script de onboarding de proveedores ejecutado correctamente.")
         except Exception as e:
             print(f"\nError en el proceso de onboarding de proveedores: {str(e)}")
@@ -137,7 +150,7 @@ def run_all_tasks():
             traceback.print_exc()
             sys.exit(1)
 
-        # PASO 5: ACTUALIZAR RESPONSABILIDAD FISCAL
+        # PASO 5: ACTUALIZAR RESPONSABILIDAD FISCAL EN LOS PROVEEDORES
         print("\n" + "="*80)
         print("Running Actualizar responsabilidad Fiscal process...")
         print("="*80)
@@ -154,7 +167,7 @@ def run_all_tasks():
             traceback.print_exc()
             sys.exit(1)
 
-        # PASO 6: FACTURAS DE ARRENDAMIENTO
+        # PASO 6: FACTURAS DE ARRENDAMIENTO 
         print("\n" + "="*80)
         print("Running Facturas de Arrendamiento process...")
         print("="*80)
@@ -170,28 +183,8 @@ def run_all_tasks():
             traceback.print_exc()
             sys.exit(1)
 
-        # PASO 7: CARGAR Y SUBIR PUCS
-        """print("\n" + "="*80)
-        print("Running PUCs upload process...")
-        print("="*80)
+        # Paso 7 SUBE LOS CODIGOS PUCS DEL USUARIO
         
-        from pucs_user import get_pucs_user, upload_pucs
-        
-        try:
-            pucs_user = get_pucs_user()
-            if pucs_user:
-                print(f"PUCs del usuario cargados correctamente: {len(pucs_user)} PUCs encontrados.")
-                upload_pucs(pucs_user)
-                print("PUCs subidos correctamente.")
-            else:
-                print("No se encontraron PUCs del usuario.")
-        except Exception as e:
-            print(f"\nError al cargar o subir PUCs: {str(e)}")
-            print("\nFull stack trace:")
-            traceback.print_exc()
-            sys.exit(1)"""
-
-        # Paso 8 -- mismo del 7 . Favor revisar
         print("\n" + "="*80)
         print("Running Modelo Causación process...")
         print("="*80)

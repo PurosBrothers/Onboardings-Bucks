@@ -5,7 +5,6 @@ import gc
 from bson import ObjectId
 from dotenv import load_dotenv
 import openpyxl
-import pymongo_auth_aws
 from pymongo import MongoClient
 from pathlib import Path
 

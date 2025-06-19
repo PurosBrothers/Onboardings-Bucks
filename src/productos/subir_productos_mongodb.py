@@ -4,19 +4,26 @@ import csv
 from pymongo import MongoClient
 from bson import ObjectId
 from datetime import datetime, timezone
-import sys  # Import the sys module
+import sys
 
-# Carga variables de entorno desde .env
+"""
+Script para limpiar y cargar productos en la base de datos MongoDB a partir de un archivo CSV.
+
+Este script realiza las siguientes acciones:
+1. Carga las variables de entorno necesarias para conectarse a la base de datos MongoDB (por predeterminado en entorno de desarrollo, está comentada la configuración para conectarse STAGING si se requiere).
+2. Elimina todos los productos existentes asociados al usuario especificado por UID_USER en la colección "products".
+3. Lee un archivo CSV de productos, omitiendo las primeras 5 líneas, y procesa cada fila para extraer información relevante como nombre, descripción, precio, línea, grupo, unidad de medida y NIT de proveedores.
+4. Convierte los precios a formato numérico, limpia los NITs y genera un código único para cada producto.
+5. Inserta cada producto como un documento en la colección "products" de MongoDB, evitando duplicados por código.
+
+"""
+
+# =============================
+# CONFIGURACIÓN Y CONSTANTES
+# =============================
 load_dotenv()
 
 CSV_PATH = os.path.join("data", "productos", "SurtifloraListaProductos.csv")
-
-# Configuración MongoDB (Staging)
-# aws_key = os.getenv("STAGING_AWS_ACCESS_KEY_ID")
-# aws_secret = os.getenv("STAGING_AWS_SECRET_ACCESS_KEY")
-# cluster = os.getenv("STAGING_CLUSTER_URL")
-# db_name = os.getenv("STAGING_DB")
-# app_name = os.getenv("STAGING_APP_NAME")
 
 # Configuración MongoDB (Dev)
 aws_key = os.getenv("DEV_AWS_ACCESS_KEY_ID")
@@ -34,62 +41,64 @@ uri = (
     f"&appName={app_name}"
 )
 
-
-UID_FILTER = ObjectId(os.getenv("UID_USER"))
-
+# =============================
+# FUNCIONES AUXILIARES
+# =============================
 def parse_price(value_str):
     """
-    Convierte una cadena con separadores de miles (coma) y punto decimal
-    en un float.  Ej: "25,000.00000" -> 25000.0
+    Convierte una cadena con separadores de miles (coma) y punto decimal en un float.
+    Ejemplo: "25,000.00000" -> 25000.0
     """
-    # Elimina las comas utilizadas como separador de miles
     cleaned = value_str.replace(',', '')
     try:
         return float(cleaned)
     except ValueError:
         return 0.0
 
+def limpiar_nit(nit_raw: str) -> str:
+    """
+    Limpia el NIT/cédula de caracteres no numéricos y espacios.
+    """
+    return ''.join(filter(str.isdigit, nit_raw or ''))
 
-def create_products_from_csv():
-    client = MongoClient(uri)
-    db = client[db_name]
-    products = db["products"]
-
-    created_count = 0
+# =============================
+# LECTURA Y PROCESAMIENTO DEL CSV
+# =============================
+def leer_productos_desde_csv(csv_path=CSV_PATH, uid=None):
+    """
+    Lee los productos desde el archivo CSV y los retorna como una lista de diccionarios.
+    Args:
+        csv_path (str): Ruta al archivo CSV
+        uid (ObjectId): UID del usuario para asociar los productos (obligatorio)
+    Returns:
+        List[dict]: Lista de productos listos para insertar en MongoDB
+    """
+    if uid is None:
+        raise ValueError("El parámetro 'uid' es obligatorio y debe ser un ObjectId válido.")
+    productos = []
     product_index = 1
-
-    with open(CSV_PATH, newline="", encoding="utf-8") as f:
+    with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
-        # Saltar las primeras 5 líneas
+        # Saltar las primeras 5 líneas (encabezados)
         for _ in range(5):
             next(reader, None)
-
         for row in reader:
-            # columnas: D->row[3], E->row[4], G->row[6]
             name = (row[3] or "").strip()
             description = (row[4] or "").strip()
             price1 = parse_price(row[6] if len(row) > 6 else "0")
             linea = (row[0] or "").strip()
             grupo = (row[1] or "").strip()
-            unidadMedida = (row[79] or "").strip()
-            nit_proveedor = [limpiar_nit(row[i]) for i in range(50, 54) if row[i].strip()]
-
+            unidadMedida = (row[79] or "").strip() if len(row) > 79 else ""
+            nit_proveedor = [limpiar_nit(row[i]) for i in range(50, 54) if len(row) > i and row[i].strip()]
             code = f"Surtiflora{product_index:09d}"
-
-            # Verificar la existencia
-            if products.find_one({"UID": UID_FILTER, "code": code}):
-                product_index += 1
-                continue
-
             # Construir la lista de precios dinámicamente
             price_list = [{
                 "position": 1,
                 "name": "Lista general",
                 "value": price1
             }]
-
             doc = {
-                "UID": UID_FILTER,
+                "UID": uid,
                 "code": code,
                 "active": True,
                 "available_quantity": 0,
@@ -116,41 +125,67 @@ def create_products_from_csv():
                 "unitMeasure": unidadMedida,
                 "nit_providers": nit_proveedor,
             }
-
-            products.insert_one(doc)
-            # Imprime en la salida estándar, lo que aún puede tener problemas de codificación.
-            # Utiliza la declaración de impresión corregida a continuación.
-            print(f"✅ Created: {doc['name']} ({code}) with price {price1}".encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding))
-            created_count += 1
+            productos.append(doc)
             product_index += 1
+    return productos
 
-    client.close()
-    # Utiliza sys.stdout.encoding para manejar la codificación correctamente.
-    print(f"🎉 Done. Created {created_count} new products.".encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding))
-
-
+# =============================
+# OPERACIONES EN MONGODB
+# =============================
 def delete_existing_products(uid: ObjectId):
     """
-    Delete all products with the specified UID from the products collection.
-
+    Elimina todos los productos con el UID especificado de la colección products.
     Args:
-        uid (ObjectId): The UID filter to match products for deletion
+        uid (ObjectId): UID para filtrar productos a eliminar
     """
     client = MongoClient(uri)
     db = client[db_name]
     products = db["products"]
-
     result = products.delete_many({"UID": uid})
     print(f"🗑️  Deleted {result.deleted_count} existing products for UID: {uid}".encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding))
     client.close()
-    
-def limpiar_nit(nit_raw: str) -> str:
-    """
-    Limpia el NIT/cédula de caracteres no numéricos y espacios.
-    """
-    return ''.join(filter(str.isdigit, nit_raw or ''))
 
+def subir_productos_a_mongodb(uid):
+    """
+    Lee los productos del CSV y los sube a MongoDB, evitando duplicados por code y UID.
+    Args:
+        uid (ObjectId): UID del usuario para asociar productos
+    """
+    productos = leer_productos_desde_csv(uid=uid)
+    client = MongoClient(uri)
+    db = client[db_name]
+    products = db["products"]
+    created_count = 0
+    for doc in productos:
+        # Verificar la existencia para evitar duplicados
+        if products.find_one({"UID": doc["UID"], "code": doc["code"]}):
+            continue
+        products.insert_one(doc)
+        print(f"✅ Created: {doc['name']} ({doc['code']}) with price {doc['prices'][0]['price_list'][0]['value']}".encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding))
+        created_count += 1
+    client.close()
+    print(f"🎉 Done. Created {created_count} new products.".encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding))
 
+def cargar_productos_desde_csv_a_mongodb(uid):
+    """
+    Método general para eliminar productos existentes y cargar los nuevos desde el CSV a MongoDB.
+    Args:
+        uid (ObjectId): UID del usuario para filtrar y asociar productos (obligatorio)
+    """
+    delete_existing_products(uid)
+    subir_productos_a_mongodb(uid)
+
+# =============================
+# MAIN
+# =============================
 if __name__ == "__main__":
-    delete_existing_products(UID_FILTER)
-    create_products_from_csv()
+    import sys
+    if len(sys.argv) < 2:
+        print("Uso: python subir_productos_mongodb.py <UID_USER>")
+        sys.exit(1)
+    try:
+        uid = ObjectId(sys.argv[1])
+    except Exception:
+        print("El UID proporcionado no es válido. Debe ser un ObjectId de MongoDB.")
+        sys.exit(1)
+    cargar_productos_desde_csv_a_mongodb(uid)
