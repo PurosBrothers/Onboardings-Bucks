@@ -142,7 +142,7 @@ def run_all_tasks():
         from proveedores.subir_proveedores_mongodb import subir_main
         
         try:
-            subir_main(UID, True)
+            subir_main(UID)
             print("El script de onboarding de proveedores ejecutado correctamente.")
         except Exception as e:
             print(f"\nError en el proceso de onboarding de proveedores: {str(e)}")
@@ -155,11 +155,11 @@ def run_all_tasks():
         print("Running Actualizar responsabilidad Fiscal process...")
         print("="*80)
         
-        from modelo_terceros import actualizar_responsabilidad_fiscal_actividad
+        from proveedores.modelo_terceros import main as actualizar_responsabilidad_fiscal_actividad
         
         try:
             # Ejecutar la función de actualización de responsabilidad fiscal y actividad
-            actualizar_responsabilidad_fiscal_actividad()
+            actualizar_responsabilidad_fiscal_actividad(UID)
             print("Actualización de responsabilidad fiscal y actividad económica completada.")
         except Exception as e:
             print(f"\nError en la actualización de responsabilidad fiscal: {str(e)}")
@@ -175,7 +175,7 @@ def run_all_tasks():
         from causaciones.facturas_arrendamiento_por_proveedor import main as facturas_main
         
         try:
-            facturas_main()
+            facturas_main(UID)
             print("Proceso de facturas de arrendamiento por proveedor completado.")
         except Exception as e:
             print(f"\nError en el proceso de facturas de arrendamiento: {str(e)}")
@@ -190,18 +190,14 @@ def run_all_tasks():
         print("="*80)
         
         # Importar y ejecutar el script de procesamiento del modelo de causación
-        from surtifloraCausacion import process_excel_file
+        from causaciones.onboarding_causacion import main as procesar_causacion
         
         try:
-            # Obtener UID_USER y construir la ruta del archivo
-            uid_user = os.getenv("UID_USER")
-            if not uid_user:
-                raise ValueError("Variable de entorno UID_USER no encontrada en el archivo .env")
             
             app_root = os.path.abspath(os.path.dirname(__file__))
             xlsx_path = os.path.abspath(os.path.join(app_root, "..", "data", "modelos_causacion", "SurtifloraModeloCausacionAbril2025.xlsx"))
             
-            process_excel_file(uid_user, xlsx_path)
+            procesar_causacion(UID, xlsx_path)
             print("Proceso de modelo de causación completado.")
         except Exception as e:
             print(f"\nError en el proceso de modelo de causación: {str(e)}")

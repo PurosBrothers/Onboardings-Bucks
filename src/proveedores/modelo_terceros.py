@@ -3,15 +3,20 @@ import logging
 import pandas as pd
 from pymongo import MongoClient
 from bson import ObjectId
+import sys
 
+# =============================
 # Configuración de logging
+# =============================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Configuración de conexión (entorno de desarrollo)
+# =============================
+# Configuración de conexión a MongoDB
+# =============================
 target_config = {
     "aws_access_key_id": os.getenv("DEV_AWS_ACCESS_KEY_ID"),
     "aws_secret_access_key": os.getenv("DEV_AWS_SECRET_ACCESS_KEY"),
@@ -20,21 +25,19 @@ target_config = {
     "app_name": os.getenv("DEV_APP_NAME")
 }
 
-# Identificador de usuario específico (campo en la colección: 'UID')
-UID_FILTER = ObjectId(os.getenv("UID_USER"))
+COLLECTION_NAME = "providers"
 
-# URI de conexión a MongoDB Atlas con autenticación AWS
 TARGET_URI = (
     f"mongodb+srv://{target_config['aws_access_key_id']}:{target_config['aws_secret_access_key']}@"
     f"{target_config['cluster_url']}?authSource=%24external&authMechanism=MONGODB-AWS"
     f"&retryWrites=true&w=majority&appName={target_config['app_name']}"
 )
 
-# Colección de trabajo
-COLLECTION_NAME = "providers"
+ruta_archivo = os.path.join('data', 'modelos_terceros', 'Surtiflora-Modelo_de_terceros.csv')
 
-
-# Funciones auxiliares
+# =============================
+# Funciones auxiliares de limpieza
+# =============================
 def limpiar_nit(nit_raw: str) -> str:
     """
     Limpia el NIT/cédula de caracteres no numéricos y espacios.
@@ -51,10 +54,73 @@ def limpiar_campo(valor: str) -> str:
     return valor.strip()
 
 
-def actualizar_responsabilidad_fiscal_actividad():
+# =============================
+# Procesamiento del archivo CSV
+# =============================
+def procesar_csv_terceros(ruta_archivo: str):
     """
-    Lee el archivo Surtiflora-Modelo_de_terceros.csv y actualiza los proveedores
-    con la información de responsabilidad fiscal y actividad económica.
+    Procesa el archivo CSV de terceros y retorna una lista de diccionarios con los datos limpios.
+    """
+    try:
+        df = pd.read_csv(ruta_archivo, encoding='utf-8', low_memory=False, dtype=str)
+    except Exception as e:
+        logger.error(f"Error al leer el archivo CSV: {ruta_archivo}: {e}")
+        return None, f"Error al leer el archivo CSV: {e}"
+
+    # Identificar columnas relevantes
+    columnas = {
+        'nit': 'IDENTIFICACIÓN  (OBLIGATORIO)',
+        'resp_fiscal': None,
+        'act_economica': None,
+        'codigo_ciudad': None,
+        'razon_social': None,
+        'sucursal': None
+    }
+    for col in df.columns:
+        if 'RESPONSABILIDAD FISCAL' in col.upper():
+            columnas['resp_fiscal'] = col
+        if 'ACTIVIDAD ECONÓMICA' in col.upper() or 'CODIGO ACTIVIDAD' in col.upper():
+            columnas['act_economica'] = col
+        if 'CIUDAD' in col.upper():
+            columnas['codigo_ciudad'] = col
+        if 'RAZÓN SOCIAL' in col.upper():
+            columnas['razon_social'] = col
+        if 'SUCURSAL' in col.upper():
+            columnas['sucursal'] = col
+
+    # Validar columnas requeridas
+    if not columnas['resp_fiscal'] or not columnas['act_economica'] or not columnas['codigo_ciudad']:
+        logger.error(f"No se encontraron todas las columnas necesarias en el archivo {ruta_archivo}")
+        return None, "Faltan columnas requeridas en el archivo CSV."
+
+    logger.info(f"Columnas detectadas: {columnas}")
+    datos = []
+    for idx, row in df.iterrows():
+        nit_raw = row.get(columnas['nit'])
+        if pd.isna(nit_raw) or not nit_raw:
+            logger.warning(f"Fila {idx+2} sin NIT válido, se omite.")
+            continue
+        nit = limpiar_nit(nit_raw)
+        registro = {
+            'nit': nit,
+            'fiscalResponsability': limpiar_campo(row.get(columnas['resp_fiscal'], '')),
+            'activity': limpiar_campo(row.get(columnas['act_economica'], '')),
+            'city': limpiar_campo(row.get(columnas['codigo_ciudad'], '')),
+            'businessName': limpiar_campo(row.get(columnas['razon_social'], '')),
+            'branchOffice': limpiar_campo(row.get(columnas['sucursal'], ''))
+        }
+        datos.append(registro)
+    logger.info(f"Total de registros procesados del CSV: {len(datos)}")
+    return datos, None
+
+
+# =============================
+# Actualización de proveedores en MongoDB
+# =============================
+def actualizar_proveedores(datos, uid):
+    """
+    Actualiza los proveedores en MongoDB con la información procesada del CSV y el UID proporcionado.
+    Busca el proveedor comparando el NIT del Excel con el campo 'id' de la base de datos.
     """
     client = None
     stats = {
@@ -63,148 +129,81 @@ def actualizar_responsabilidad_fiscal_actividad():
         'registros_fallidos_fiscal': 0,
         'errores': []
     }
-
     try:
         client = MongoClient(TARGET_URI)
         db = client[target_config['db_name']]
         collection = db[COLLECTION_NAME]
-
-        # Ruta al archivo de modelo de terceros
-        ruta_archivo = os.path.join('data', 'modelos', 'Surtiflora-Modelo_de_terceros.csv')
-        logger.info(f"Procesando archivo de responsabilidad fiscal: {ruta_archivo}")
-
-        try:
-            # Leer el CSV con todas las columnas como tipo string
-            df = pd.read_csv(ruta_archivo, encoding='utf-8', low_memory=False, dtype=str)
-
-            # Detectar columnas necesarias
-            columnas_resp_fiscal = [col for col in df.columns if 'RESPONSABILIDAD FISCAL' in col.upper()]
-            columnas_act_economica = [col for col in df.columns if 'ACTIVIDAD ECONÓMICA' in col.upper() or 'CODIGO ACTIVIDAD' in col.upper()]
-            columnas_codigo_ciudad = [col for col in df.columns if 'CIUDAD' in col.upper()]
-            columnas_razon_social = [col for col in df.columns if 'RAZÓN SOCIAL' in col.upper()]
-            columnas_sucursal = [col for col in df.columns if 'SUCURSAL  (OBLIGATORIO)' in col.upper()]
-            #RAZÓN SOCIAL
-            #SUCURSAL  (OBLIGATORIO)
-
-
-            if not columnas_resp_fiscal or not columnas_act_economica or not columnas_codigo_ciudad:
-                mensaje_error = f"No se encontraron las columnas necesarias en el archivo {ruta_archivo}"
-                logger.error(mensaje_error)
-                stats['errores'].append(mensaje_error)
-                logger.error(f"Columnas disponibles: {', '.join(df.columns)}")
-                return stats
-
-            columna_resp_fiscal = columnas_resp_fiscal[0]
-            columna_act_economica = columnas_act_economica[0]
-            columna_codigo_ciudad = columnas_codigo_ciudad[0]
-            columna_razon_social = columnas_razon_social[0]
-            columna_sucursal = columnas_sucursal[0]
-            #RAZÓN SOCIAL
-            #SUCURSAL  (OBLIGATORIO)
-
-
-            logger.info(f"Usando columna '{columna_resp_fiscal}' para responsabilidad fiscal")
-            logger.info(f"Usando columna '{columna_act_economica}' para actividad económica")
-            logger.info(f"Usando columna '{columna_codigo_ciudad}' para código de ciudad")
-
-            # Construir query para filtrar por usuario si aplica
-            query = {'UID': UID_FILTER} 
-            existing_providers = list(collection.find(query))
-            logger.info(f"Se encontraron {len(existing_providers)} proveedores en la base de datos con filtro {query}")
-
-            # Mapas de búsqueda
-            provider_map_by_id = {p.get('id'): p['_id'] for p in existing_providers if p.get('id')}
-            provider_map_by_nit = {p.get('nit'): p['_id'] for p in existing_providers if p.get('nit')}
-
-            # Procesar cada fila del CSV
-            for idx, row in df.iterrows():
-                stats['registros_procesados_fiscal'] += 1
-                try:
-                    nit_raw = row.get('IDENTIFICACIÓN  (OBLIGATORIO)')
-                    if pd.isna(nit_raw) or not nit_raw:
-                        logger.warning(f"Fila {idx+2} sin NIT válido")
-                        stats['registros_fallidos_fiscal'] += 1
-                        continue
-
-                    nit = limpiar_nit(nit_raw)
-                    responsabilidad_fiscal = limpiar_campo(row.get(columna_resp_fiscal, ''))
-                    actividad_economica = limpiar_campo(row.get(columna_act_economica, ''))
-                    codigo_ciudad = limpiar_campo(row.get(columna_codigo_ciudad, ''))
-                    razon_social = limpiar_campo(row.get(columna_razon_social, ''))
-                    sucursal = limpiar_campo(row.get(columna_sucursal, ''))
-                    #RAZÓN SOCIAL
-                    #SUCURSAL  (OBLIGATORIO)
-
-                    if not responsabilidad_fiscal and not actividad_economica or not codigo_ciudad:
-                        logger.warning(f"Fila {idx+2} sin datos fiscales o actividad económica para NIT {nit}")
-                        stats['registros_fallidos_fiscal'] += 1
-                        continue
-
-                    # Buscar ID en los mapas
-                    mongo_id = provider_map_by_id.get(nit) or provider_map_by_nit.get(nit)
-                    if not mongo_id:
-                        filtro_id = {'$or': [{'id': nit}, {'nit': nit}]}
-                        # combinar con filtro de usuario si corresponde
-                        filtro_final = {'$and': [query, filtro_id]} if query else filtro_id
-                        proveedor = collection.find_one(filtro_final)
-                        if proveedor:
-                            mongo_id = proveedor['_id']
-
-                    if mongo_id:
-                        update_data = {'$set': {}}
-                        if responsabilidad_fiscal:
-                            update_data['$set']['fiscalResponsability'] = responsabilidad_fiscal
-                        if actividad_economica:
-                            update_data['$set']['activity'] = actividad_economica
-                        if codigo_ciudad:
-                            update_data['$set']['city'] = codigo_ciudad
-                        if razon_social:
-                            update_data['$set']['businessName'] = razon_social
-                        if sucursal:
-                            update_data['$set']['branchOffice'] = sucursal                 
-                            #RAZÓN SOCIAL
-                            #SUCURSAL  (OBLIGATORIO)
-                            
-                        if update_data['$set']:
-                            result = collection.update_one({'_id': mongo_id}, update_data)
-                            if result.modified_count > 0:
-                                logger.info(f"Actualizado proveedor NIT {nit}")
-                                stats['proveedores_actualizados_fiscal'] += 1
-                            else:
-                                logger.warning(f"No modificado documento para NIT {nit}")
-                        else:
-                            logger.warning(f"No hay datos para actualizar para NIT {nit}")
+        query = {'UID': uid}
+        existing_providers = list(collection.find(query))
+        # Mapeo: NIT (del Excel) -> id (de la base de datos)
+        provider_map_by_id = {p.get('id'): p['_id'] for p in existing_providers if p.get('id')}
+        for idx, registro in enumerate(datos):
+            stats['registros_procesados_fiscal'] += 1
+            nit = registro['nit']
+            if not nit:
+                stats['registros_fallidos_fiscal'] += 1
+                continue
+            mongo_id = provider_map_by_id.get(nit)
+            if mongo_id:
+                update_data = {'$set': {}}
+                for campo in ['fiscalResponsability', 'activity', 'city', 'businessName', 'branchOffice']:
+                    if registro[campo]:
+                        update_data['$set'][campo] = registro[campo]
+                if update_data['$set']:
+                    result = collection.update_one({'_id': mongo_id}, update_data)
+                    if result.modified_count > 0:
+                        logger.info(f"Proveedor NIT {nit} actualizado correctamente.")
+                        stats['proveedores_actualizados_fiscal'] += 1
                     else:
-                        logger.warning(f"Proveedor no encontrado para NIT {nit}")
-                        stats['registros_fallidos_fiscal'] += 1
-
-                except Exception as row_error:
-                    mensaje_error = f"Error fila {idx+2}: {str(row_error)}"
-                    logger.error(mensaje_error, exc_info=True)
-                    stats['registros_fallidos_fiscal'] += 1
-                    stats['errores'].append(mensaje_error)
-                    continue
-
-        except pd.errors.EmptyDataError:
-            mensaje_error = f"Archivo {ruta_archivo} está vacío o inválido."
-            logger.warning(mensaje_error)
-            stats['errores'].append(mensaje_error)
-        except Exception as file_error:
-            mensaje_error = f"Error al procesar archivo {ruta_archivo}: {str(file_error)}"
-            logger.error(mensaje_error, exc_info=True)
-            stats['errores'].append(mensaje_error)
-
+                        logger.warning(f"Proveedor NIT {nit} no requirió actualización.")
+                else:
+                    logger.warning(f"No hay datos para actualizar para NIT {nit}.")
+            else:
+                logger.warning(f"Proveedor no encontrado para NIT {nit}.")
+                stats['registros_fallidos_fiscal'] += 1
+    except Exception as e:
+        logger.error(f"Error general al actualizar proveedores: {e}", exc_info=True)
+        stats['errores'].append(str(e))
     finally:
         if client:
             client.close()
-            logger.info("Conexión a MongoDB cerrada")
-
+            logger.info("Conexión a MongoDB cerrada.")
     logger.info(f"Finalizado. Proveedores actualizados: {stats['proveedores_actualizados_fiscal']}")
     return stats
 
 
-def main():
-    stats = actualizar_responsabilidad_fiscal_actividad()
+# =============================
+# Función principal
+# =============================
+def main(uid=None):
+    """
+    Orquesta el procesamiento del CSV y la actualización de proveedores en MongoDB.
+    Recibe el UID como argumento (ObjectId o str convertible a ObjectId).
+    Si no se proporciona, lo toma de la línea de comandos.
+    """
+    if uid is None:
+        if len(sys.argv) < 2:
+            print("Uso: python modelo_terceros.py <UID>")
+            return
+        try:
+            uid = ObjectId(sys.argv[1])
+        except Exception:
+            print("El UID proporcionado no es un ObjectId válido.")
+            return
+    else:
+        if not isinstance(uid, ObjectId):
+            try:
+                uid = ObjectId(uid)
+            except Exception:
+                print("El UID proporcionado no es un ObjectId válido.")
+                return
+    logger.info(f"Iniciando procesamiento de archivo: {ruta_archivo}")
+    datos, error = procesar_csv_terceros(ruta_archivo)
+    if error:
+        logger.error(error)
+        print(f"Error: {error}")
+        return
+    stats = actualizar_proveedores(datos, uid)
     print("--- Resultado de la actualización ---")
     print(f"Proveedores procesados: {stats['registros_procesados_fiscal']}")
     print(f"Proveedores actualizados: {stats['proveedores_actualizados_fiscal']}")
