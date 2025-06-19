@@ -1,9 +1,11 @@
 import os
 import logging
 import pandas as pd
-from pymongo import MongoClient
 from bson import ObjectId
 import sys
+
+from src.utils.mongodb_manager import MongoDBManager
+from src.config.mongodb_config import MongoDBConfig
 
 # =============================
 # Configuración de logging
@@ -17,22 +19,7 @@ logger = logging.getLogger(__name__)
 # =============================
 # Configuración de conexión a MongoDB
 # =============================
-target_config = {
-    "aws_access_key_id": os.getenv("DEV_AWS_ACCESS_KEY_ID"),
-    "aws_secret_access_key": os.getenv("DEV_AWS_SECRET_ACCESS_KEY"),
-    "cluster_url": os.getenv("DEV_CLUSTER_URL"),
-    "db_name": os.getenv("DEV_DB"),
-    "app_name": os.getenv("DEV_APP_NAME")
-}
-
 COLLECTION_NAME = "providers"
-
-TARGET_URI = (
-    f"mongodb+srv://{target_config['aws_access_key_id']}:{target_config['aws_secret_access_key']}@"
-    f"{target_config['cluster_url']}?authSource=%24external&authMechanism=MONGODB-AWS"
-    f"&retryWrites=true&w=majority&appName={target_config['app_name']}"
-)
-
 ruta_archivo = os.path.join('data', 'modelos_terceros', 'Surtiflora-Modelo_de_terceros.csv')
 
 # =============================
@@ -129,10 +116,12 @@ def actualizar_proveedores(datos, uid):
         'registros_fallidos_fiscal': 0,
         'errores': []
     }
+    mongo_manager = None
     try:
-        client = MongoClient(TARGET_URI)
-        db = client[target_config['db_name']]
-        collection = db[COLLECTION_NAME]
+        mongodb_config = MongoDBConfig(env_prefix="DEV")
+        mongodb_config.set_collection_name(COLLECTION_NAME)
+        mongo_manager = MongoDBManager(mongodb_config)
+        collection = mongo_manager.collection
         query = {'UID': uid}
         existing_providers = list(collection.find(query))
         # Mapeo: NIT (del Excel) -> id (de la base de datos)

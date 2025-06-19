@@ -1,3 +1,7 @@
+"""
+Script para subir proveedores y transacciones a MongoDB..
+"""
+
 import os
 import pandas as pd
 from pymongo import MongoClient
@@ -11,6 +15,10 @@ import datetime
 import json
 import random
 import string
+
+# =============================
+# CONFIGURACIÓN Y CONSTANTES
+# =============================
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,6 +52,14 @@ FAILED_CSV = "fallidos.csv"
 REPORT_JSON = "reporte_onboarding.json"
 
 def generar_id_proveedor(fecha_str_input, base_para_unicidad_str=""):
+    """
+    Genera un ID único para el proveedor basado en la fecha y un sufijo aleatorio.
+    Args:
+        fecha_str_input (str): Fecha de la transacción o del archivo.
+        base_para_unicidad_str (str): Cadena base para unicidad (opcional).
+    Returns:
+        str: ID generado.
+    """
     fecha_formateada_yyyymmdd = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
     if fecha_str_input and isinstance(fecha_str_input, str):
         parsed_date = None
@@ -68,16 +84,37 @@ def generar_id_proveedor(fecha_str_input, base_para_unicidad_str=""):
     return id_final
 
 def limpiar_campo(valor):
+    """
+    Limpia un campo eliminando espacios en blanco.
+    Args:
+        valor: Valor a limpiar.
+    Returns:
+        Valor limpio.
+    """
     if isinstance(valor, str):
         return valor.strip()
     return valor
 
 def limpiar_nit(nit):
+    """
+    Limpia el NIT dejando solo los dígitos.
+    Args:
+        nit (str): NIT a limpiar.
+    Returns:
+        str: NIT limpio.
+    """
     if isinstance(nit, str):
         return ''.join(filter(str.isdigit, nit))
     return nit
 
 def extraer_datos_transaccion(row):
+    """
+    Extrae los datos de transacción relevantes de una fila del DataFrame.
+    Args:
+        row (pd.Series): Fila del DataFrame.
+    Returns:
+        dict: Diccionario con los datos de la transacción.
+    """
     transaccion = {}
     campos_transaccion = {
         'COMPROBANTE': 'comprobante',
@@ -94,9 +131,15 @@ def extraer_datos_transaccion(row):
             transaccion[campo_mongodb] = limpiar_campo(row[campo_original])
     return transaccion if transaccion else None
 
+# =============================
+# PROCESAMIENTO DE ARCHIVOS CSV
+# =============================
+
 def leer_y_procesar_csvs():
     """
     Lee los archivos CSV procesados y retorna una lista de proveedores y transacciones.
+    Returns:
+        tuple: (proveedores, registros_fallidos, stats)
     """
     proveedores = []
     registros_fallidos = []
@@ -204,9 +247,17 @@ def leer_y_procesar_csvs():
 
     return proveedores, registros_fallidos, stats
 
+# =============================
+# SUBIDA DE DATOS A MONGODB
+# =============================
+
 def subir_proveedores_a_mongodb(proveedores):
     """
     Sube la lista de proveedores procesados a MongoDB.
+    Args:
+        proveedores (list): Lista de proveedores procesados.
+    Returns:
+        dict: Estadísticas de la operación (creados/actualizados).
     """
     client = MongoClient(TARGET_URI)
     db = client[config.db_name]
@@ -271,7 +322,20 @@ def subir_proveedores_a_mongodb(proveedores):
     client.close()
     return stats
 
+# =============================
+# MÉTODO PRINCIPAL DE SUBIDA
+# =============================
+
 def subir_main(uid):
+    """
+    Orquesta el proceso completo de onboarding:
+    - Elimina proveedores existentes.
+    - Procesa los archivos CSV.
+    - Sube los proveedores a MongoDB.
+    - Muestra un resumen del proceso.
+    Args:
+        uid (str): UID del cliente/proyecto.
+    """
     delete_existing_providers()
     logger.info("=" * 60)
     logger.info("Iniciando proceso de onboarding de datos")
@@ -314,11 +378,16 @@ def subir_main(uid):
     logger.info("=" * 60)
 
 def delete_existing_providers():
+    """
+    Elimina todos los proveedores existentes en la colección de MongoDB para el UID dado.
+    """
     db_manager = MongoDBManager(config)
     deleted_count = db_manager.delete_all_providers(UID_FILTER)
     logger.info(f"Se eliminaron {deleted_count} proveedores existentes con UID: {UID_FILTER}")
     db_manager.close()
 
-
+# =============================
+# MAIN
+# =============================
 if __name__ == "__main__":
     delete_existing_providers()

@@ -6,6 +6,9 @@ from bson import ObjectId
 from datetime import datetime, timezone
 import sys
 
+from src.utils.mongodb_manager import MongoDBManager
+from src.config.mongodb_config import MongoDBConfig
+
 """
 Script para limpiar y cargar productos en la base de datos MongoDB a partir de un archivo CSV.
 
@@ -24,22 +27,6 @@ Este script realiza las siguientes acciones:
 load_dotenv()
 
 CSV_PATH = os.path.join("data", "productos", "SurtifloraListaProductos.csv")
-
-# Configuración MongoDB (Dev)
-aws_key = os.getenv("DEV_AWS_ACCESS_KEY_ID")
-aws_secret = os.getenv("DEV_AWS_SECRET_ACCESS_KEY")
-cluster = os.getenv("DEV_CLUSTER_URL")
-db_name = os.getenv("DEV_DB")
-app_name = os.getenv("DEV_APP_NAME")
-
-uri = (
-    f"mongodb+srv://{aws_key}:{aws_secret}"
-    f"@{cluster}"
-    "?authSource=%24external"
-    "&authMechanism=MONGODB-AWS"
-    "&retryWrites=true&w=majority"
-    f"&appName={app_name}"
-)
 
 # =============================
 # FUNCIONES AUXILIARES
@@ -132,48 +119,40 @@ def leer_productos_desde_csv(csv_path=CSV_PATH, uid=None):
 # =============================
 # OPERACIONES EN MONGODB
 # =============================
-def delete_existing_products(uid: ObjectId):
+def delete_existing_products(mongo_manager: MongoDBManager, uid: ObjectId):
     """
     Elimina todos los productos con el UID especificado de la colección products.
-    Args:
-        uid (ObjectId): UID para filtrar productos a eliminar
     """
-    client = MongoClient(uri)
-    db = client[db_name]
-    products = db["products"]
-    result = products.delete_many({"UID": uid})
+    collection = mongo_manager.db["products"]
+    result = collection.delete_many({"UID": uid})
     print(f"🗑️  Deleted {result.deleted_count} existing products for UID: {uid}".encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding))
-    client.close()
 
-def subir_productos_a_mongodb(uid):
+def subir_productos_a_mongodb(mongo_manager: MongoDBManager, uid):
     """
     Lee los productos del CSV y los sube a MongoDB, evitando duplicados por code y UID.
-    Args:
-        uid (ObjectId): UID del usuario para asociar productos
     """
     productos = leer_productos_desde_csv(uid=uid)
-    client = MongoClient(uri)
-    db = client[db_name]
-    products = db["products"]
+    collection = mongo_manager.db["products"]
     created_count = 0
     for doc in productos:
-        # Verificar la existencia para evitar duplicados
-        if products.find_one({"UID": doc["UID"], "code": doc["code"]}):
+        if collection.find_one({"UID": doc["UID"], "code": doc["code"]}):
             continue
-        products.insert_one(doc)
+        collection.insert_one(doc)
         print(f"✅ Created: {doc['name']} ({doc['code']}) with price {doc['prices'][0]['price_list'][0]['value']}".encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding))
         created_count += 1
-    client.close()
     print(f"🎉 Done. Created {created_count} new products.".encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding))
 
 def cargar_productos_desde_csv_a_mongodb(uid):
     """
     Método general para eliminar productos existentes y cargar los nuevos desde el CSV a MongoDB.
-    Args:
-        uid (ObjectId): UID del usuario para filtrar y asociar productos (obligatorio)
     """
-    delete_existing_products(uid)
-    subir_productos_a_mongodb(uid)
+    mongodb_config = MongoDBConfig(env_prefix="DEV")
+    mongo_manager = MongoDBManager(mongodb_config)
+    try:
+        delete_existing_products(mongo_manager, uid)
+        subir_productos_a_mongodb(mongo_manager, uid)
+    finally:
+        mongo_manager.close()
 
 # =============================
 # MAIN

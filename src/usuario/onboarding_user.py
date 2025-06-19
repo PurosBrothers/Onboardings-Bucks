@@ -22,7 +22,8 @@ import sys
 from urllib.parse import quote_plus
 from datetime import datetime
 from argon2 import PasswordHasher
-from pymongo import MongoClient
+from src.utils.mongodb_manager import MongoDBManager
+from src.config.mongodb_config import MongoDBConfig
 from bson import ObjectId
 from dotenv import load_dotenv, set_key
 from src.usuario.user_manager import UserManager
@@ -62,6 +63,8 @@ target_config = {
     "db_name": os.getenv("DEV_DB"),
     "app_name": os.getenv("DEV_APP_NAME")
 }
+
+mongodb_config = MongoDBConfig(env_prefix="DEV")
 
 # Debug: Mostrar parámetros de conexión (sin datos sensibles)
 print("🔍 Debugging MongoDB connection parameters:")
@@ -138,19 +141,20 @@ print("🔍 End of User Configuration debugging\n")
 # =============================
 # FUNCIONES PRINCIPALES
 # =============================
-def clean_user_data(db, user_id=None):
+def clean_user_data(mongo_manager: MongoDBManager, user_id=None):
     """
     Elimina datos de módulos e integraciones del usuario, pero NO elimina el usuario si ya existe.
     Si no se proporciona user_id, busca por email.
     Retorna el UID del usuario si existe, o None si no existe.
     """
     print("Iniciando limpieza de módulos e integraciones...")
-    users_collection = db["users"]
+    users_collection = mongo_manager.db["users"]
     uid = None
     if user_id is None:
         user = users_collection.find_one({"email": target_email})
         if user:
             uid = user["_id"]
+            users_collection.delete_one({"_id": uid})
             print(f"Usuario ya existe con UID: {uid}")
         else:
             print("No se encontró usuario existente para limpiar módulos/integraciones")
@@ -160,12 +164,13 @@ def clean_user_data(db, user_id=None):
             uid = ObjectId(user_id)
         except Exception:
             uid = user_id
+        users_collection.delete_one({"_id": uid})
     # Limpiar solo módulos e integraciones
     collections_to_clean = ["modules", "integrations"]
     total_deleted = 0
     for collection_name in collections_to_clean:
         try:
-            collection = db[collection_name]
+            collection = mongo_manager.db[collection_name]
             result = collection.delete_many({"UID": uid})
             deleted_count = result.deleted_count
             total_deleted += deleted_count
@@ -179,13 +184,13 @@ def clean_user_data(db, user_id=None):
     return uid
 
 
-def create_modules(db, user_id, cost_module_code: str, expense_module_code: str):
+def create_modules(mongo_manager: MongoDBManager, user_id, cost_module_code: str, expense_module_code: str):
     """
     Elimina los módulos existentes del usuario y crea los módulos de costos y gastos.
     """
     print("📦 Creando módulos...")
     
-    modules_collection = db["modules"]
+    modules_collection = mongo_manager.db["modules"]
     current_time = datetime.now()
 
     # Convertir user_id a ObjectId si es necesario
@@ -230,11 +235,11 @@ def create_modules(db, user_id, cost_module_code: str, expense_module_code: str)
     }
 
 
-def create_integration(db, user_id):
+def create_integration(mongo_manager: MongoDBManager, user_id):
     """
     Crea la integración de usuario con el módulo de costos y gastos.
     """
-    integration_collection = db["integrations"]
+    integration_collection = mongo_manager.db["integrations"]
     current_time = datetime.now()
 
     # Convertir user_id a ObjectId si es necesario
@@ -264,64 +269,49 @@ def create_integration(db, user_id):
 
 async def setup_user() -> str:
     """
-    Configura el usuario: si ya existe, lo actualiza y usa su UID; si no, lo crea.
+    Configura el usuario: si ya existe, lo elimina y lo crea de nuevo.
     Siempre borra y recrea módulos e integraciones.
     """
     try:
         print("🔍 Attempting to connect to MongoDB...")
         print(f"🔍 Using URI: mongodb+srv://***:***@{target_config['cluster_url']}?authSource=%24external&authMechanism=MONGODB-AWS&retryWrites=true&w=majority&appName={target_config['app_name']}")
-        client = MongoClient(TARGET_URI)
+        mongo_manager = MongoDBManager(mongodb_config)
+        db = mongo_manager.db
+        users_collection = db["users"]
         print("🔍 MongoClient created successfully")
-        db = client.admin
         print("🔍 Attempting to ping MongoDB...")
         db.command('ping')
         print("✓ MongoDB connection successful")
-        db = client[target_config["db_name"]]
-        users_collection = db["users"]
-        modules_collection = db["modules"]
         print(f"\nConfigurando usuario: {target_email}")
         print("=" * 50)
-        # PASO 1: Limpiar módulos e integraciones, obtener UID si existe
-        uid = clean_user_data(db)
-        if uid:
-            # Usuario ya existe, actualizar datos si hay cambios
-            update_fields = {}
-            if name: update_fields["name"] = name
-            if lastname: update_fields["lastname"] = lastname
-            if phone: update_fields["phone"] = phone
-            if password: update_fields["password"] = PasswordHasher().hash(password)
-            if update_fields:
-                users_collection.update_one({"_id": uid}, {"$set": update_fields})
-                print(f"Usuario existente actualizado con nuevos datos: {update_fields}")
-            else:
-                print("No hay datos nuevos para actualizar en el usuario existente.")
-        else:
-            # Usuario no existe, crearlo
-            print("Creando usuario desde cero...")
-            user_service = UserManager(
-                name=name,
-                lastname=lastname,
-                email=target_email,
-                phone=phone,
-                password_plain=password,
-                num_consecutivo=NUM_CONSECUTIVO
-            )
-            new_user = await user_service.create_user()
-            uid = str(new_user.id)
-            print(f"Usuario creado con ID: {uid}")
+        # PASO 1: Limpiar usuario, módulos e integraciones, obtener UID si existe
+        uid = clean_user_data(mongo_manager)
+        # Ahora, siempre crea el usuario desde cero
+        print("Creando usuario desde cero...")
+        user_service = UserManager(
+            name=name,
+            lastname=lastname,
+            email=target_email,
+            phone=phone,
+            password_plain=password,
+            num_consecutivo=NUM_CONSECUTIVO
+        )
+        new_user = await user_service.create_user()
+        uid = str(new_user.id)
+        print(f"Usuario creado con ID: {uid}")
         # PASO 2: Crear módulos
         print("Creando módulos para usuario...")
-        create_modules(db, uid, cost_code, expense_code)
+        create_modules(mongo_manager, uid, cost_code, expense_code)
         # PASO 3: Crear integración
         print("Configurando integración...")
-        create_integration(db, uid)
+        create_integration(mongo_manager, uid)
         print("\n" + "=" * 50)
         print("Configuración completada exitosamente")
         print("=" * 50)
         print(f"Usuario: {target_email}")
         print(f"UID: {uid}")
         print(f"Numero consecutivo: {NUM_CONSECUTIVO}")
-        client.close()
+        mongo_manager.close()
         return str(uid)
     except Exception as e:
         print(f"Error de conexión MongoDB: {str(e)}")
