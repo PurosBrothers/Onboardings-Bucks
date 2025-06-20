@@ -1,0 +1,4 @@
+# conf/config.yaml
+defaults:
+  - global: default
+  - paths: default

@@ -1,0 +1,6 @@
+paths:
+  csv_productos: "data/productos/SurtifloraListaProductos.csv"
+  dir_proveedores: "data/proveedores"
+  modelo_terceros: "data/modelos_terceros/Surtiflora-Modelo_de_terceros.csv"
+  xlsx_causacion: "data/modelos_causacion/SurtifloraModeloCausacionAbril2025.xlsx"
+  zip_facturas: "data/facturas"

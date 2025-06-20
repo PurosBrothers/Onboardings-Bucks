@@ -1,0 +1,10 @@
+global:
+  num_consecutivo: "1"
+  test_user_email: "prueba-final-oboarding@surtiflora.com"
+  test_password_plain: "Prueba1234"
+  test_user_name: "Prueba-Final"
+  test_user_lastname: "Onboarding"
+  test_user_phone: "3000000000"
+  test_cost_code: "28465"
+  test_expense_code: "28460"
+  uid_user: null

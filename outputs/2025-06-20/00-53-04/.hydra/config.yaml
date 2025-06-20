@@ -1,0 +1,18 @@
+global:
+  global:
+    num_consecutivo: '1'
+    test_user_email: prueba-final-oboarding@surtiflora.com
+    test_password_plain: Prueba1234
+    test_user_name: Prueba-Final
+    test_user_lastname: Onboarding
+    test_user_phone: '3000000000'
+    test_cost_code: '28465'
+    test_expense_code: '28460'
+    uid_user: null
+paths:
+  paths:
+    csv_productos: data/productos/SurtifloraListaProductos.csv
+    dir_proveedores: data/proveedores
+    modelo_terceros: data/modelos_terceros/Surtiflora-Modelo_de_terceros.csv
+    xlsx_causacion: data/modelos_causacion/SurtifloraModeloCausacionAbril2025.xlsx
+    zip_facturas: data/facturas
