@@ -7,6 +7,8 @@ import sys
 from src.utils.mongodb_manager import MongoDBManager
 from src.config.mongodb_config import MongoDBConfig
 
+AMBIENTE = "STAGING"
+
 # =============================
 # Configuración de logging
 # =============================
@@ -118,7 +120,7 @@ def actualizar_proveedores(datos, uid):
     }
     mongo_manager = None
     try:
-        mongodb_config = MongoDBConfig(env_prefix="DEV")
+        mongodb_config = MongoDBConfig(env_prefix=AMBIENTE)
         mongodb_config.set_collection_name(COLLECTION_NAME)
         mongo_manager = MongoDBManager(mongodb_config)
         collection = mongo_manager.collection

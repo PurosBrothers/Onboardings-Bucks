@@ -73,7 +73,7 @@ def ejecutar_onboarding_completo():
             traceback.print_exc()
             sys.exit(1)
 
-        # === PASO 2: Carga de productos a la base de datos ===
+        """        # === PASO 2: Carga de productos a la base de datos ===
         print("\n" + "="*80)
         print("[2/8] Carga de productos a la base de datos...")
         print("="*80)
@@ -113,7 +113,7 @@ def ejecutar_onboarding_completo():
             print(f"\nError en el onboarding de proveedores: {str(e)}")
             traceback.print_exc()
             sys.exit(1)
-
+        
         # === PASO 5: Actualización de responsabilidad fiscal y actividad económica ===
         print("\n" + "="*80)
         print("[5/8] Actualización de responsabilidad fiscal y actividad económica...")
@@ -126,12 +126,14 @@ def ejecutar_onboarding_completo():
             print(f"\nError en la actualización de responsabilidad fiscal: {str(e)}")
             traceback.print_exc()
             sys.exit(1)
-
+        
+        """
+        
         # === PASO 6: Procesamiento de facturas de arrendamiento ===
         print("\n" + "="*80)
         print("[6/8] Procesamiento de facturas de arrendamiento...")
         print("="*80)
-        from causaciones.facturas_arrendamiento_por_proveedor import main as procesamiento_facturas
+        from causaciones.facturas_por_proveedor import main as procesamiento_facturas
         try:
             procesamiento_facturas(UID)
             print("Procesamiento de facturas de arrendamiento completado.")

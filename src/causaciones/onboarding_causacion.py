@@ -17,6 +17,10 @@ from config.mongodb_config import MongoDBConfig
 from utils.mongodb_manager import MongoDBManager
 from config.beanie_config import init_db
 
+AMBIENTE = "STAGING"
+
+
+
 # =============================
 # Configuración de logging
 # =============================
@@ -47,7 +51,7 @@ def crear_indices_client_pucs(uid_usuario: str):
     Crea los índices necesarios para la colección client_pucs.
     """
     try:
-        config = MongoDBConfig(env_prefix="DEV")
+        config = MongoDBConfig(env_prefix=AMBIENTE)
         config.set_collection_name("client_pucs")
         gestor = MongoDBManager(config)
         gestor.collection.create_index(
@@ -66,7 +70,7 @@ def eliminar_client_pucs_existentes(uid_usuario: str):
     Elimina todos los documentos existentes para el usuario en la colección client_pucs.
     """
     try:
-        config = MongoDBConfig(env_prefix="DEV")
+        config = MongoDBConfig(env_prefix=AMBIENTE)
         config.set_collection_name("client_pucs")
         gestor = MongoDBManager(config)
         resultado = gestor.collection.delete_many({"UID": ObjectId(uid_usuario)})
@@ -91,7 +95,7 @@ def procesar_archivo_excel(uid_usuario: str, ruta_xlsx: str):
         eliminar_client_pucs_existentes(uid_usuario)
         logger.info("Creando índices...")
         crear_indices_client_pucs(uid_usuario)
-        config = MongoDBConfig(env_prefix="DEV")
+        config = MongoDBConfig(env_prefix=AMBIENTE)
         config.set_collection_name("client_pucs")
         gestor = MongoDBManager(config)
         logger.info(f"Cargando archivo Excel: {ruta_xlsx}")
@@ -188,7 +192,7 @@ def crear_centro_costo_por_puc(uid: str, nit: str, cuenta: str, centro: str, sub
     Crea un documento de centro de costo por PUC en la colección correspondiente.
     """
     logger.info(f"Iniciando creación de centro de costo para PUC: UID={uid}, NIT={nit}, Cuenta={cuenta}, CentroCosto={centro}, SubCentro={subcentro}")
-    config = MongoDBConfig(env_prefix="DEV")
+    config = MongoDBConfig(env_prefix=AMBIENTE)
     config.set_collection_name("cost_center_per_puc")
     gestor = MongoDBManager(config)
     nit_limpio = limpiar_nit(nit)

@@ -21,6 +21,8 @@ Este script realiza las siguientes acciones:
 
 """
 
+AMBIENTE = "STAGING"
+
 # =============================
 # CONFIGURACIÓN Y CONSTANTES
 # =============================
@@ -146,7 +148,7 @@ def cargar_productos_desde_csv_a_mongodb(uid):
     """
     Método general para eliminar productos existentes y cargar los nuevos desde el CSV a MongoDB.
     """
-    mongodb_config = MongoDBConfig(env_prefix="DEV")
+    mongodb_config = MongoDBConfig(env_prefix=AMBIENTE)
     mongo_manager = MongoDBManager(mongodb_config)
     try:
         delete_existing_products(mongo_manager, uid)

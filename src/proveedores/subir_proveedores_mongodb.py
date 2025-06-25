@@ -16,6 +16,8 @@ import json
 import random
 import string
 
+AMBIENTE = "STAGING"
+
 # =============================
 # CONFIGURACIÓN Y CONSTANTES
 # =============================
@@ -41,7 +43,7 @@ load_dotenv()
 # }
 
 # Configuración de conexión a MongoDB dev
-config = MongoDBConfig(env_prefix="DEV")
+config = MongoDBConfig(env_prefix=AMBIENTE)
 TARGET_URI = config.target_uri
 COLLECTION_NAME = config.get_collection_name()
 UID_FILTER = config.uid_filter

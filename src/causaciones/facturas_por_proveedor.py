@@ -10,6 +10,8 @@ from typing import Optional
 from bson import ObjectId
 from pathlib import Path
 
+AMBIENTE = "STAGING"
+
 # Add the project root directory to Python path
 project_root = str(Path(__file__).parent.parent.parent)
 if project_root not in sys.path:
@@ -141,7 +143,7 @@ def procesar_y_subir_facturas(uid):
     """
     Procesa el archivo Excel y sube las facturas de arrendamiento a MongoDB para el UID dado.
     """
-    config = MongoDBConfig(env_prefix="DEV")
+    config = MongoDBConfig(env_prefix=AMBIENTE)
     config.collection_name = "invoices"
     manager = MongoDBManager(config)
     created_count = 0
@@ -165,8 +167,8 @@ def procesar_y_subir_facturas(uid):
         if not row or not row[0]:
             continue
         tipo_factura = str(row[0]).strip()
-        if tipo_factura != "Arrendamiento":
-            logging.info(f"[SKIP] Tipo de factura '{tipo_factura}' no es 'Arrendamiento', saltando...")
+        if "Servicio" not in tipo_factura and "Arrendamiento" not in tipo_factura:
+            logging.info(f"[SKIP] Tipo de factura '{tipo_factura}' no es 'Servicio - Gasto' ni 'Arrendamiento', saltando...")
             continue
         id_proveedor = limpiar_nit(str(row[16])).strip()
         descripcion_archivo = str(row[18]).strip()
@@ -176,29 +178,25 @@ def procesar_y_subir_facturas(uid):
             invoice_index += 1
             continue
         facturas_procesadas.add(id_factura_original)
-        zip_files = get_zip_files(ZIP_PATH)
-        zip_encontrado = buscar_zip_similar(zip_files, id_factura_original)
-        if zip_encontrado:
-            id_factura = os.path.splitext(zip_encontrado)[0]
-            descripcion_dian = extraer_descripcion_dian(id_factura)
-        else:
-            id_factura = id_factura_original
-            descripcion_dian = extraer_descripcion_dian(id_factura)
+        id_factura = str(row[86]).strip()
+        descripcion_dian = extraer_descripcion_dian(id_factura)
         # Verificar si ya existe un documento con la misma clave única
         if manager.collection.find_one({
             "UID": uid,
-            "invoice_id": id_factura
+            "invoiceId": id_factura
         }):
             logging.info(f"[SKIP] Factura ya existe en MongoDB: {id_factura}")
             invoice_index += 1
             continue
         invoice_data = {
             "UID": uid,
-            "provider_id": id_proveedor,
+            "supplierId": id_proveedor,
             "file_description": descripcion_archivo,
-            "invoice_id": id_factura,
+            "invoiceId": id_factura,
             "invoice_type": tipo_factura,
             "dian_description": descripcion_dian,
+            "module": id_proveedor,
+            "entity": id_factura 
         }
         try:
             manager.collection.insert_one(invoice_data)

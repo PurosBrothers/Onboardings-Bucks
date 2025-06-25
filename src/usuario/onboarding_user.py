@@ -30,6 +30,8 @@ from src.usuario.user_manager import UserManager
 from pathlib import Path
 import asyncio
 
+AMBIENTE = "STAGING"
+
 # =============================
 # CARGA DE VARIABLES DE ENTORNO
 # =============================
@@ -64,7 +66,7 @@ target_config = {
     "app_name": os.getenv("DEV_APP_NAME")
 }
 
-mongodb_config = MongoDBConfig(env_prefix="DEV")
+mongodb_config = MongoDBConfig(env_prefix=AMBIENTE)
 
 # Debug: Mostrar parámetros de conexión (sin datos sensibles)
 print("🔍 Debugging MongoDB connection parameters:")
@@ -154,7 +156,6 @@ def clean_user_data(mongo_manager: MongoDBManager, user_id=None):
         user = users_collection.find_one({"email": target_email})
         if user:
             uid = user["_id"]
-            users_collection.delete_one({"_id": uid})
             print(f"Usuario ya existe con UID: {uid}")
         else:
             print("No se encontró usuario existente para limpiar módulos/integraciones")
@@ -164,7 +165,6 @@ def clean_user_data(mongo_manager: MongoDBManager, user_id=None):
             uid = ObjectId(user_id)
         except Exception:
             uid = user_id
-        users_collection.delete_one({"_id": uid})
     # Limpiar solo módulos e integraciones
     collections_to_clean = ["modules", "integrations"]
     total_deleted = 0
@@ -286,19 +286,20 @@ async def setup_user() -> str:
         print("=" * 50)
         # PASO 1: Limpiar usuario, módulos e integraciones, obtener UID si existe
         uid = clean_user_data(mongo_manager)
-        # Ahora, siempre crea el usuario desde cero
-        print("Creando usuario desde cero...")
-        user_service = UserManager(
-            name=name,
-            lastname=lastname,
-            email=target_email,
-            phone=phone,
-            password_plain=password,
-            num_consecutivo=NUM_CONSECUTIVO
-        )
-        new_user = await user_service.create_user()
-        uid = str(new_user.id)
-        print(f"Usuario creado con ID: {uid}")
+        if uid is None:
+            # Usuario no existe, crearlo
+            print("Creando usuario desde cero...")
+            user_service = UserManager(
+                name=name,
+                lastname=lastname,
+                email=target_email,
+                phone=phone,
+                password_plain=password,
+                num_consecutivo=NUM_CONSECUTIVO
+            )
+            new_user = await user_service.create_user()
+            uid = str(new_user.id)
+            print(f"Usuario creado con ID: {uid}")
         # PASO 2: Crear módulos
         print("Creando módulos para usuario...")
         create_modules(mongo_manager, uid, cost_code, expense_code)
