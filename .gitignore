@@ -8,8 +8,9 @@ limpiar_excels_before.py
 *Surtiflora-LibroAuxiliar_2024_Procesado.csv
 *Surtiflora-LibroAuxiliar_2023_Procesado.csv
 *Surtiflora-LibroAuxiliar_2022_Procesado.csv
-*SurtifloraModeloCausacionAbril2025.xlsx
 *onboarding_surtiflora.log
+*outputs
+*conf.yaml
 
 .~lock.*.xlsx
 

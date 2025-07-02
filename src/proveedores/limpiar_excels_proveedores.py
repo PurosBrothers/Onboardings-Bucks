@@ -16,7 +16,7 @@ Script profesional para limpiar y procesar archivos de proveedores (Libro Auxili
 # =============================
 # CONFIGURACIÓN Y CONSTANTES
 # =============================
-EXPECTED_COUNTS = {
+CONTEOS_ESPERADOS = {
     "Surtiflora-LibroAuxiliar_2022.csv": {
         "total_rows": 7301,
         "puc_5_rows": 3999,
@@ -40,19 +40,19 @@ EXPECTED_COUNTS = {
 # =============================
 # FUNCIONES AUXILIARES
 # =============================
-def analizar_densidad_filas(df: pd.DataFrame, umbral: float = 0.3) -> List[int]:
+def analizar_densidad_filas(marco_datos: pd.DataFrame, umbral: float = 0.3) -> List[int]:
     """
     Analiza la densidad de datos por fila y retorna los índices válidos.
     
     Args:
-        df (pd.DataFrame): El DataFrame de entrada
+        marco_datos (pd.DataFrame): El DataFrame de entrada
         umbral (float): Proporción mínima de valores no nulos requerida (por defecto: 0.3)
     
     Returns:
         List[int]: Lista de índices de filas que cumplen con el umbral de densidad
     """
     # Calcular la proporción de valores no nulos para cada fila
-    densidades = df.notna().sum(axis=1) / df.shape[1]
+    densidades = marco_datos.notna().sum(axis=1) / marco_datos.shape[1]
     
     # Obtener índices donde la densidad está por encima del umbral
     indices_validos = densidades[densidades >= umbral].index.tolist()
@@ -65,18 +65,18 @@ def analizar_densidad_filas(df: pd.DataFrame, umbral: float = 0.3) -> List[int]:
     
     return indices_validos
 
-def analizar_datos(df: pd.DataFrame) -> None:
+def analizar_datos(marco_datos: pd.DataFrame) -> None:
     """
     Muestra un resumen de las primeras filas y la distribución de cuentas PUC.
     
     Args:
-        df (pd.DataFrame): DataFrame a analizar
+        marco_datos (pd.DataFrame): DataFrame a analizar
     """
     print("\nPrimeras filas:")
-    print(df.iloc[:5, [1, 2]].to_string())  # Mostrar columnas de PUC y descripción
+    print(marco_datos.iloc[:5, [1, 2]].to_string())  # Mostrar columnas de PUC y descripción
     
     # Contar tipos de cuenta (comenzando con 5 o 6)
-    cuentas = df.iloc[:, 1].astype(str).str[:1]  # Obtener el primer dígito del código PUC
+    cuentas = marco_datos.iloc[:, 1].astype(str).str[:1]  # Obtener el primer dígito del código PUC
     conteo = cuentas[cuentas.isin(['5', '6'])].value_counts()
     
     print("\nDistribución de cuentas:")
@@ -123,20 +123,20 @@ def extraer_nit_nombre(fila: pd.Series) -> Tuple[str, str]:
         print(f"Datos de la fila: {fila.to_dict()}")
         return "", ""
 
-def encontrar_fila_encabezado(df: pd.DataFrame, umbral_unnamed: float = 0.5) -> int:
+def encontrar_fila_encabezado(marco_datos: pd.DataFrame, umbral_sin_nombre: float = 0.5) -> int:
     """
     Busca la primera fila que debe usarse como encabezados verificando la proporción de columnas sin nombre.
     
     Args:
-        df (pd.DataFrame): El DataFrame de entrada
-        umbral_unnamed (float): Proporción máxima de columnas sin nombre permitida
+        marco_datos (pd.DataFrame): El DataFrame de entrada
+        umbral_sin_nombre (float): Proporción máxima de columnas sin nombre permitida
         
     Returns:
         int: Índice de la fila a usar como encabezado
     """
-    for idx in range(len(df)):
+    for idx in range(len(marco_datos)):
         # Convertir fila a nombres de columna y verificar proporción de sin nombre
-        columnas_prueba = df.iloc[idx].tolist()
+        columnas_prueba = marco_datos.iloc[idx].tolist()
         
         # Contar valores vacíos, nan, o sin nombre
         sin_nombre = sum(1 for col in columnas_prueba 
@@ -154,7 +154,7 @@ def encontrar_fila_encabezado(df: pd.DataFrame, umbral_unnamed: float = 0.5) -> 
         proporcion_sin_nombre = sin_nombre / len(columnas_prueba)
         
         # Queremos al menos 3 nombres de columna significativos y menos que el umbral de sin nombre
-        if valores_significativos >= 3 and proporcion_sin_nombre <= umbral_unnamed:
+        if valores_significativos >= 3 and proporcion_sin_nombre <= umbral_sin_nombre:
             print(f"\nEncabezado encontrado en la fila {idx}")
             print("Encabezados:", [str(col).strip() for col in columnas_prueba if pd.notna(col) and str(col).strip()])
             return idx
@@ -182,10 +182,10 @@ def validar_conteo_filas(nombre_archivo: str, total: int, puc_5: int, puc_6: int
         ValueError: Si la validación falla o no se encuentran reglas para el archivo
     """
     base = os.path.basename(nombre_archivo)
-    if base not in EXPECTED_COUNTS:
+    if base not in CONTEOS_ESPERADOS:
         raise ValueError(f"No hay reglas de validación para {base}")
         
-    esperado = EXPECTED_COUNTS[base]
+    esperado = CONTEOS_ESPERADOS[base]
     errores = []
     
     if total != esperado["total_rows"]:
@@ -203,30 +203,30 @@ def validar_conteo_filas(nombre_archivo: str, total: int, puc_5: int, puc_6: int
 # =============================
 # PROCESAMIENTO PRINCIPAL DE ARCHIVO
 # =============================
-def procesar_libro_auxiliar(input_file: str, output_file: str, expected_counts: Dict[str, int] | None = None) -> None:
+def procesar_libro_auxiliar(archivo_entrada: str, archivo_salida: str, conteos_esperados: Dict[str, int] | None = None) -> None:
     """
     Procesa un archivo de libro auxiliar y genera un CSV limpio.
     
     Args:
-        input_file (str): Ruta al archivo CSV de entrada
-        output_file (str): Ruta para guardar el archivo CSV procesado
-        expected_counts (Dict[str, int] | None): Diccionario opcional con conteos de filas esperados
+        archivo_entrada (str): Ruta al archivo CSV de entrada
+        archivo_salida (str): Ruta para guardar el archivo CSV procesado
+        conteos_esperados (Dict[str, int] | None): Diccionario opcional con conteos de filas esperados
             que contiene claves: "total_rows", "puc_5_rows", "puc_6_rows"
     """
     # Asegurar que las rutas de archivo usen separadores compatibles con Windows
-    input_file = os.path.normpath(input_file)
-    output_file = os.path.normpath(output_file)
+    archivo_entrada = os.path.normpath(archivo_entrada)
+    archivo_salida = os.path.normpath(archivo_salida)
     
     # Probar diferentes codificaciones para Windows
     codificaciones = ['latin1', 'utf-8', 'cp1252']
-    df = None
+    marco_datos = None
     codificacion_exitosa = None
     
     for codificacion in codificaciones:
         try:
             print(f"\nIntentando leer el archivo con codificación: {codificacion}")
             # Leer el archivo CSV sin encabezados primero
-            df = pd.read_csv(input_file, engine='python', encoding=codificacion, header=None)
+            marco_datos = pd.read_csv(archivo_entrada, engine='python', encoding=codificacion, header=None)
             codificacion_exitosa = codificacion
             print(f"Lectura exitosa con codificación: {codificacion}")
             break
@@ -234,42 +234,42 @@ def procesar_libro_auxiliar(input_file: str, output_file: str, expected_counts: 
             print(f"Error con codificación {codificacion}: {str(e)}")
             continue
     
-    if df is None:
+    if marco_datos is None:
         raise ValueError("No se pudo leer el archivo con ninguna de las codificaciones intentadas")
     
-    print(f"\nAnálisis inicial: {len(df)} filas")
+    print(f"\nAnálisis inicial: {len(marco_datos)} filas")
     
     # Encontrar la fila del encabezado
-    fila_encabezado = encontrar_fila_encabezado(df)
+    fila_encabezado = encontrar_fila_encabezado(marco_datos)
     
     # Volver a leer el CSV con la fila de encabezado correcta
     try:
-        df = pd.read_csv(input_file, engine='python', encoding=codificacion_exitosa, skiprows=fila_encabezado)
+        marco_datos = pd.read_csv(archivo_entrada, engine='python', encoding=codificacion_exitosa, skiprows=fila_encabezado)
     except Exception as e:
         print(f"Error al releer con encabezados: {str(e)}")
         # Probar enfoque alternativo - leer sin encabezados y establecer manualmente
-        df = pd.read_csv(input_file, engine='python', encoding=codificacion_exitosa, header=None, skiprows=fila_encabezado)
+        marco_datos = pd.read_csv(archivo_entrada, engine='python', encoding=codificacion_exitosa, header=None, skiprows=fila_encabezado)
         # Usar la primera fila como encabezado (este enfoque puede necesitar ajustes)
-        df.columns = [f"Col_{i}" if pd.isna(x) or not str(x).strip() else str(x).strip() for i, x in enumerate(df.iloc[0])]
-        df = df.iloc[1:].reset_index(drop=True)
+        marco_datos.columns = [f"Col_{i}" if pd.isna(x) or not str(x).strip() else str(x).strip() for i, x in enumerate(marco_datos.iloc[0])]
+        marco_datos = marco_datos.iloc[1:].reset_index(drop=True)
     
-    print(f"\nColumnas detectadas: {df.columns.tolist()}")
+    print(f"\nColumnas detectadas: {marco_datos.columns.tolist()}")
     
     # Obtener índices válidos basados en la densidad de datos
-    indices_validos = analizar_densidad_filas(df)
+    indices_validos = analizar_densidad_filas(marco_datos)
     
     # Filtrar DataFrame para mantener solo filas válidas
-    df_filtrado = df.iloc[indices_validos].copy()
+    marco_datos_filtrado = marco_datos.iloc[indices_validos].copy()
     
     # Analizar datos filtrados
     print("\nAnálisis de datos filtrados:")
-    analizar_datos(df_filtrado)
+    analizar_datos(marco_datos_filtrado)
     
     # Crear lista para datos de salida
     datos_salida: List[Dict] = []
     
     # Procesar cada fila válida
-    for _, fila in df_filtrado.iterrows():
+    for _, fila in marco_datos_filtrado.iterrows():
         try:
             # Obtener código PUC y descripción directamente de las columnas
             # Manejar posibles errores de conversión de cadena
@@ -293,8 +293,8 @@ def procesar_libro_auxiliar(input_file: str, output_file: str, expected_counts: 
                     'NOMBRE': nombre
                 }
                 # Agregar columnas restantes
-                for col_idx, col_name in enumerate(df.columns[2:], start=2):
-                    fila_dict[col_name] = fila.iloc[col_idx]
+                for indice_col, nombre_col in enumerate(marco_datos.columns[2:], start=2):
+                    fila_dict[nombre_col] = fila.iloc[indice_col]
                 datos_salida.append(fila_dict)
         except Exception as e:
             print(f"Error procesando fila {fila.name}: {str(e)}")
@@ -305,22 +305,22 @@ def procesar_libro_auxiliar(input_file: str, output_file: str, expected_counts: 
     if not datos_salida:
         raise ValueError("No se pudo procesar ninguna fila válida")
         
-    df_final = pd.DataFrame(datos_salida)
+    marco_datos_final = pd.DataFrame(datos_salida)
     
     # Eliminar columnas que están completamente vacías o en NA
-    columnas_no_vacias = df_final.columns[df_final.notna().any()]
-    df_final = df_final[columnas_no_vacias]
+    columnas_no_vacias = marco_datos_final.columns[marco_datos_final.notna().any()]
+    marco_datos_final = marco_datos_final[columnas_no_vacias]
     
     # Formatear CUENTA como entero (eliminando decimales) - con manejo de errores
     try:
-        df_final['CUENTA'] = df_final['CUENTA'].astype(float).astype(int).astype(str)
+        marco_datos_final['CUENTA'] = marco_datos_final['CUENTA'].astype(float).astype(int).astype(str)
     except Exception as e:
         print(f"Error convirtiendo CUENTA: {str(e)}. Se conserva el formato original.")
     
     # Limpiar nombres de columnas
     nuevas_columnas = []
     ya_vistas = set()
-    for col in df_final.columns:
+    for col in marco_datos_final.columns:
         limpio = str(col).strip()
         if limpio in ya_vistas:
             i = 1
@@ -329,12 +329,12 @@ def procesar_libro_auxiliar(input_file: str, output_file: str, expected_counts: 
             limpio = f"{limpio}_{i}"
         ya_vistas.add(limpio)
         nuevas_columnas.append(limpio)
-    df_final.columns = nuevas_columnas
+    marco_datos_final.columns = nuevas_columnas
     
     # Contar códigos PUC que comienzan con 5 y 6
-    puc_5 = df_final['CUENTA'].str.startswith('5').sum()
-    puc_6 = df_final['CUENTA'].str.startswith('6').sum()
-    total = len(df_final)
+    puc_5 = marco_datos_final['CUENTA'].str.startswith('5').sum()
+    puc_6 = marco_datos_final['CUENTA'].str.startswith('6').sum()
+    total = len(marco_datos_final)
     
     print(f"\nDistribución final de PUC:")
     print(f"Comienza con 5: {puc_5} filas")
@@ -342,14 +342,14 @@ def procesar_libro_auxiliar(input_file: str, output_file: str, expected_counts: 
     print(f"Total filas: {total}")
     
     # Validar conteos de filas si se proporcionaron conteos esperados
-    if expected_counts:
+    if conteos_esperados:
         errores = []
-        if total != expected_counts["total_rows"]:
-            errores.append(f"Se esperaban {expected_counts['total_rows']} filas, pero hay {total}")
-        if puc_5 != expected_counts["puc_5_rows"]:
-            errores.append(f"Se esperaban {expected_counts['puc_5_rows']} filas de PUC 5, pero hay {puc_5}")
-        if puc_6 != expected_counts["puc_6_rows"]:
-            errores.append(f"Se esperaban {expected_counts['puc_6_rows']} filas de PUC 6, pero hay {puc_6}")
+        if total != conteos_esperados["total_rows"]:
+            errores.append(f"Se esperaban {conteos_esperados['total_rows']} filas, pero hay {total}")
+        if puc_5 != conteos_esperados["puc_5_rows"]:
+            errores.append(f"Se esperaban {conteos_esperados['puc_5_rows']} filas de PUC 5, pero hay {puc_5}")
+        if puc_6 != conteos_esperados["puc_6_rows"]:
+            errores.append(f"Se esperaban {conteos_esperados['puc_6_rows']} filas de PUC 6, pero hay {puc_6}")
         
         if errores:
             print("\nADVERTENCIA: Validación de conteo de filas fallida:")
@@ -359,14 +359,14 @@ def procesar_libro_auxiliar(input_file: str, output_file: str, expected_counts: 
         else:
             print("\nValidación de conteo de filas exitosa ✓")
     
-    print(f"\nDatos finales procesados: {len(df_final)} filas, columnas: {list(df_final.columns)}")
+    print(f"\nDatos finales procesados: {len(marco_datos_final)} filas, columnas: {list(marco_datos_final.columns)}")
     print("\nMuestra de datos procesados:")
-    print(df_final.head())
+    print(marco_datos_final.head())
     
     # Usar try-except para guardar en CSV
     try:
-        df_final.to_csv(output_file, index=False, encoding='utf-8-sig')
-        print(f"\nArchivo procesado guardado como {output_file} con {len(df_final)} filas y {len(columnas_no_vacias)} columnas.")
+        marco_datos_final.to_csv(archivo_salida, index=False, encoding='utf-8-sig')
+        print(f"\nArchivo procesado guardado como {archivo_salida} con {len(marco_datos_final)} filas y {len(columnas_no_vacias)} columnas.")
     except Exception as e:
         print(f"\nError al guardar el archivo CSV: {str(e)}")
 
@@ -412,17 +412,17 @@ def procesar_todos_los_archivos(directorio_entrada: str, directorio_salida: str)
 
         try:
             # Obtener conteos esperados si están disponibles
-            expected = EXPECTED_COUNTS.get(archivo_csv)
-            if not expected:
+            esperado = CONTEOS_ESPERADOS.get(archivo_csv)
+            if not esperado:
                 raise ValueError(f"No hay reglas de validación para {archivo_csv}")
 
-            procesar_libro_auxiliar(archivo_entrada, archivo_salida, expected)
+            procesar_libro_auxiliar(archivo_entrada, archivo_salida, esperado)
             resultados.append({
                 "archivo": archivo_csv,
                 "estado": "✅ Éxito",
-                "total": expected["total_rows"],
-                "puc_5": expected["puc_5_rows"],
-                "puc_6": expected["puc_6_rows"]
+                "total": esperado["total_rows"],
+                "puc_5": esperado["puc_5_rows"],
+                "puc_6": esperado["puc_6_rows"]
             })
             print(f"Procesado correctamente {archivo_csv}")
 
@@ -454,18 +454,21 @@ def procesar_todos_los_archivos(directorio_entrada: str, directorio_salida: str)
 # =============================
 # MÉTODO GENERAL PARA LLAMAR TODO
 # =============================
-def limpiar_y_procesar_proveedores(input_dir, output_dir):
+def limpiar_y_procesar_proveedores(directorio_entrada, directorio_salida, ambiente):
     """
     Método general para limpiar y procesar todos los archivos de proveedores.
     Args:
-        input_dir (str): Directorio de entrada con los archivos CSV
-        output_dir (str): Directorio de salida para los archivos procesados
+        directorio_entrada (str): Directorio de entrada con los archivos CSV
+        directorio_salida (str): Directorio de salida para los archivos procesados
+        ambiente (str): Ambiente de ejecución
     """
-    procesar_todos_los_archivos(input_dir, output_dir)
+    # Si en el futuro se requiere usar ambiente, se puede pasar a funciones internas
+    procesar_todos_los_archivos(directorio_entrada, directorio_salida)
 
 # =============================
 # MAIN
 # =============================
 if __name__ == "__main__":
     directorio_actual = os.path.dirname(os.path.abspath(__file__))
-    limpiar_y_procesar_proveedores(directorio_actual, directorio_actual)
+    ambiente = os.environ.get("ambiente", "STAGING")
+    limpiar_y_procesar_proveedores(directorio_actual, directorio_actual, ambiente)

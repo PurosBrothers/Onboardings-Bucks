@@ -9,45 +9,45 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-EXCEL_PATH = 'data/modelos_causacion'
+RUTA_EXCELS = 'data/modelos_causacion'
 
-def get_excel_files(path):
+def obtener_archivos_excel(ruta):
     try:
-        files = [f for f in os.listdir(path) if f.endswith('.xlsx')]
-        logger.info(f"Archivos Excel encontrados: {files}")
-        return files
+        archivos = [f for f in os.listdir(ruta) if f.endswith('.xlsx')]
+        logger.info(f"Archivos Excel encontrados: {archivos}")
+        return archivos
     except Exception as e:
         logger.error(f"Error al obtener archivos Excel: {e}")
         return []
 
 def limpiar_y_camelcase(nombre):
-    base, ext = os.path.splitext(nombre)
+    base, extension = os.path.splitext(nombre)
     # Verifica si el nombre ya está limpio (sin espacios, tildes ni guiones)
     base_normalizada = unicodedata.normalize('NFKD', base).encode('ascii', 'ignore').decode('ascii')
     if base == base_normalizada and ' ' not in base and '-' not in base:
         return nombre  # No cambia el nombre si ya está limpio
     palabras = [p for p in base_normalizada.replace('-', ' ').split() if p]
     palabras = [p.capitalize() for p in palabras]
-    return ''.join(palabras) + ext
+    return ''.join(palabras) + extension
 
-def rename_excel_files():
-    excel_files = get_excel_files(EXCEL_PATH)
+def renombrar_archivos_excel():
+    archivos_excel = obtener_archivos_excel(RUTA_EXCELS)
     
-    if not excel_files:
+    if not archivos_excel:
         logger.warning("No se encontraron archivos Excel para renombrar.")
         return
     
-    for file in excel_files:
-        logger.info(f"Renombrando archivo: {file}")
-        new_name = limpiar_y_camelcase(file)
-        if new_name != file:
-            old_path = os.path.join(EXCEL_PATH, file)
-            new_path = os.path.join(EXCEL_PATH, new_name)
+    for archivo in archivos_excel:
+        logger.info(f"Renombrando archivo: {archivo}")
+        nuevo_nombre = limpiar_y_camelcase(archivo)
+        if nuevo_nombre != archivo:
+            ruta_antigua = os.path.join(RUTA_EXCELS, archivo)
+            ruta_nueva = os.path.join(RUTA_EXCELS, nuevo_nombre)
             try:
-                os.rename(old_path, new_path)
-                logger.info(f"Archivo renombrado de {file} a {new_name}")
+                os.rename(ruta_antigua, ruta_nueva)
+                logger.info(f"Archivo renombrado de {archivo} a {nuevo_nombre}")
             except Exception as e:
-                logger.error(f"Error al renombrar {file} a {new_name}: {e}")
+                logger.error(f"Error al renombrar {archivo} a {nuevo_nombre}: {e}")
 
 if __name__ == "__main__":
-    rename_excel_files()
+    renombrar_archivos_excel()
